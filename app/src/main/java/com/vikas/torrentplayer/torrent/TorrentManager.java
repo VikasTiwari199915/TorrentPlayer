@@ -735,6 +735,15 @@ public class TorrentManager {
         if (!rec.subtitleFiles.isEmpty()) {
             handle.subtitleFiles.setValue(new ArrayList<>(rec.subtitleFiles));
         }
+        // Surface the video file as soon as we know its absolute path AND a
+        // real file exists at that path. This unblocks PlayerActivity for
+        // restored FINISHED downloads (libtorrent is paused, havePiece returns
+        // false even though the file is fully on disk).
+        if (rec.videoFilePath != null
+                && rec.videoFilePath.exists()
+                && rec.videoFilePath.length() > 0) {
+            handle.videoFile.setValue(rec.videoFilePath);
+        }
     }
 
     private void prioritiseTailPieces(TorrentHandle th, TorrentRecord rec) {

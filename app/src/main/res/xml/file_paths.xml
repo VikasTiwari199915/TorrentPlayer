@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Everything under getExternalFilesDir() — that's where we save torrent
-         content under /Android/data/<pkg>/files/. -->
+    <!-- /sdcard/Android/data/<pkg>/files/ — the meta cache lives here. -->
     <external-files-path name="downloads" path="." />
+    <!-- /sdcard/Android/media/<pkg>/ — where libtorrent now writes all torrent
+         content (so the MediaScanner picks it up). FileProvider needs an
+         explicit root here, otherwise getUriForFile() throws
+         "Failed to find configured root that contains …". -->
+    <external-media-path name="media" path="." />
 </paths>

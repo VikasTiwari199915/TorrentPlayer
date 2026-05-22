@@ -89,23 +89,28 @@ public class PlayerActivity extends AppCompatActivity {
     private void setupPlayer() {
         ExoPlayer.Builder builder = new ExoPlayer.Builder(this);
 
-        // If we have everything we need to back ExoPlayer with our torrent-aware
-        // DataSource, wire it up. This is what makes MP4 / non-fast-start
-        // streaming actually work — reads block until the relevant piece is on
-        // disk, never returning the file's sparse-zero region as if it were
-        // valid bytes.
-        TorrentManager.VideoFileLayout layout = handle != null
-                ? TorrentManager.get().videoFileLayout(handle.infoHash)
-                : null;
-        TorrentHandle th = handle != null
-                ? TorrentManager.get().handleFor(handle.infoHash)
-                : null;
-        if (layout != null && th != null) {
-            TorrentDataSource.Factory factory = new TorrentDataSource.Factory(
-                    layout.file, th, layout.pieceLength, layout.fileOffsetInTorrent);
-            DefaultMediaSourceFactory msf = new DefaultMediaSourceFactory(this)
-                    .setDataSourceFactory(factory);
-            builder.setMediaSourceFactory(msf);
+        // Pick the DataSource based on whether the torrent is actually
+        // downloading. TorrentDataSource blocks reads on undownloaded pieces
+        // (essential for streaming partial MP4 / non-fast-start), but for a
+        // FINISHED / PAUSED torrent libtorrent reports havePiece=false even
+        // though the file is fully on disk — using TorrentDataSource there
+        // would just hang. Falling back to the default file DataSource reads
+        // the bytes directly.
+        DownloadHandle.State currentState = handle != null ? handle.state.getValue() : null;
+        boolean isActive = currentState == DownloadHandle.State.STARTING
+                || currentState == DownloadHandle.State.BUFFERING
+                || currentState == DownloadHandle.State.READY;
+
+        if (isActive) {
+            TorrentManager.VideoFileLayout layout = TorrentManager.get().videoFileLayout(handle.infoHash);
+            TorrentHandle th = TorrentManager.get().handleFor(handle.infoHash);
+            if (layout != null && th != null) {
+                TorrentDataSource.Factory factory = new TorrentDataSource.Factory(
+                        layout.file, th, layout.pieceLength, layout.fileOffsetInTorrent);
+                DefaultMediaSourceFactory msf = new DefaultMediaSourceFactory(this)
+                        .setDataSourceFactory(factory);
+                builder.setMediaSourceFactory(msf);
+            }
         }
 
         player = builder.build();
@@ -118,6 +123,7 @@ public class PlayerActivity extends AppCompatActivity {
             if (state == null) return;
             switch (state) {
                 case READY:
+                case FINISHED:
                     File f = handle.videoFile.getValue();
                     if (f != null && !playbackStarted) {
                         beginPlayback(f);
