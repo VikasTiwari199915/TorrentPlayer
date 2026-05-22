@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- Brand seed (used as fallback when dynamic colors are unavailable) -->
+    <color name="seed">#7B5BFF</color>
+
+    <!-- Quality chip colors -->
+    <color name="quality_4k">#FF6B6B</color>
+    <color name="quality_1080">#4ECDC4</color>
+    <color name="quality_720">#FFA94D</color>
+    <color name="quality_other">#A5A5A5</color>
+
+    <!-- Player overlay scrim -->
+    <color name="player_scrim">#80000000</color>
+</resources>

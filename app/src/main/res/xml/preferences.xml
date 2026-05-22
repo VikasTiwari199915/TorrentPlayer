@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory app:title="@string/pref_cat_api">
+        <Preference
+            android:key="pref_api_key"
+            android:title="@string/pref_api_key_title"
+            android:summary="@string/pref_api_key_summary"
+            android:icon="@drawable/ic_settings" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/pref_cat_storage">
+        <Preference
+            android:key="pref_save_dir"
+            android:title="@string/pref_save_dir_title"
+            android:selectable="false"
+            android:icon="@drawable/ic_download" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/pref_cat_streaming">
+        <ListPreference
+            android:key="pref_default_quality"
+            android:title="@string/pref_default_quality_title"
+            android:entries="@array/quality_entries"
+            android:entryValues="@array/quality_values"
+            android:defaultValue="any"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            android:key="pref_verified_only"
+            android:title="@string/pref_verified_only_title"
+            android:summary="@string/pref_verified_only_summary"
+            android:defaultValue="false" />
+
+        <SwitchPreferenceCompat
+            android:key="pref_delete_on_remove"
+            android:title="@string/pref_remove_files_title"
+            android:summary="@string/pref_remove_files_summary"
+            android:defaultValue="true" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/pref_cat_about">
+        <Preference
+            android:key="pref_version"
+            android:title="@string/pref_version_title"
+            android:selectable="false" />
+    </PreferenceCategory>
+</PreferenceScreen>
