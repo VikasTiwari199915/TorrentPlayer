@@ -16,7 +16,7 @@
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
-            app:navigationIcon="@drawable/ic_arrow_back"
+            app:navigationIcon="@drawable/rounded_arrow_back_24"
             app:title="@string/details_title" />
 
         <com.google.android.material.tabs.TabLayout

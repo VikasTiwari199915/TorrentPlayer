@@ -7,7 +7,7 @@
             android:key="pref_api_key"
             android:title="@string/pref_api_key_title"
             android:summary="@string/pref_api_key_summary"
-            android:icon="@drawable/ic_settings" />
+            android:icon="@drawable/rounded_settings_24" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="@string/pref_cat_storage">
@@ -15,7 +15,7 @@
             android:key="pref_save_dir"
             android:title="@string/pref_save_dir_title"
             android:selectable="false"
-            android:icon="@drawable/ic_download" />
+            android:icon="@drawable/rounded_download_24" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="@string/pref_cat_streaming">

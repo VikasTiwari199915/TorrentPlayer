@@ -22,7 +22,7 @@
         android:layout_width="22dp"
         android:layout_height="22dp"
         android:layout_marginStart="12dp"
-        android:src="@drawable/ic_file"
+        android:src="@drawable/rounded_docs_24"
         android:contentDescription="@null" />
 
     <LinearLayout

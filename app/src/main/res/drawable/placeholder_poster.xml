@@ -7,7 +7,7 @@
         </shape>
     </item>
     <item
-        android:drawable="@drawable/ic_movie"
+        android:drawable="@drawable/rounded_movie_24"
         android:gravity="center"
         android:width="48dp"
         android:height="48dp" />

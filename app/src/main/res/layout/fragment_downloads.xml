@@ -47,7 +47,7 @@
         <ImageView
             android:layout_width="96dp"
             android:layout_height="96dp"
-            android:src="@drawable/ic_download"
+            android:src="@drawable/rounded_download_24"
             android:alpha="0.4"
             android:contentDescription="@null" />
 

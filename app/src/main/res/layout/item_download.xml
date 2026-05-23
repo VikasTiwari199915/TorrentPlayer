@@ -98,7 +98,7 @@
             android:layout_marginStart="8dp"
             android:layout_marginBottom="8dp"
             android:text="@string/action_play_now"
-            app:icon="@drawable/ic_play"
+            app:icon="@drawable/rounded_play_arrow_24"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toEndOf="@+id/poster" />
 
@@ -109,7 +109,7 @@
             android:layout_height="wrap_content"
             android:layout_marginBottom="8dp"
             android:contentDescription="@string/action_pause"
-            app:icon="@drawable/ic_pause"
+            app:icon="@drawable/rounded_pause_24"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toStartOf="@+id/btn_remove"
             app:layout_constraintStart_toEndOf="@+id/btn_play" />
@@ -122,7 +122,7 @@
             android:layout_marginEnd="8dp"
             android:layout_marginBottom="8dp"
             android:contentDescription="@string/action_remove"
-            app:icon="@drawable/ic_delete"
+            app:icon="@drawable/rounded_delete_24"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
 

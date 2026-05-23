@@ -57,7 +57,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            app:icon="@drawable/ic_open_external"
+            app:icon="@drawable/rounded_open_in_new_24"
             android:text="@string/action_open_external" />
     </LinearLayout>
 

@@ -135,10 +135,10 @@ public class DownloadsAdapter extends ListAdapter<DownloadHandle, DownloadsAdapt
                     || s == DownloadHandle.State.READY;
             boolean canResume = s == DownloadHandle.State.PAUSED || s == DownloadHandle.State.ERROR;
             if (canPause) {
-                b.btnPause.setIconResource(R.drawable.ic_pause);
+                b.btnPause.setIconResource(R.drawable.rounded_pause_24);
                 b.btnPause.setVisibility(android.view.View.VISIBLE);
             } else if (canResume) {
-                b.btnPause.setIconResource(R.drawable.ic_play);
+                b.btnPause.setIconResource(R.drawable.rounded_play_arrow_24);
                 b.btnPause.setVisibility(android.view.View.VISIBLE);
             } else {
                 b.btnPause.setVisibility(View.INVISIBLE);

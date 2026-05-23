@@ -166,7 +166,7 @@ public class DetailsFilesFragment extends Fragment {
             lp.width = indentPx;
             b.indent.setLayoutParams(lp);
 
-            b.icon.setImageResource(node.isFolder ? R.drawable.ic_folder : R.drawable.ic_file);
+            b.icon.setImageResource(node.isFolder ? R.drawable.rounded_folder_24 : R.drawable.rounded_docs_24);
             b.name.setText(node.name);
             String meta = FormatUtils.humanBytes(node.size);
             if (node.isFolder) meta = node.fileCount + " files · " + meta;

@@ -61,7 +61,7 @@
                     android:id="@+id/rating_icon"
                     android:layout_width="14dp"
                     android:layout_height="14dp"
-                    android:src="@drawable/ic_star"
+                    android:src="@drawable/rounded_star_24"
                     android:contentDescription="@null" />
 
                 <TextView

@@ -14,7 +14,7 @@
         android:id="@+id/icon"
         android:layout_width="32dp"
         android:layout_height="32dp"
-        android:src="@drawable/ic_file"
+        android:src="@drawable/rounded_docs_24"
         android:contentDescription="@null" />
 
     <LinearLayout
