@@ -40,6 +40,9 @@ public class SearchViewModel extends AndroidViewModel {
 
     private String currentQuery = "";
     private Filter currentFilter = Filter.ALL;
+    @Nullable private String currentGenre;     // null = no filter
+    @Nullable private Integer currentSeason;   // null = no filter
+    @Nullable private Integer currentEpisode;  // null = no filter
     private int currentPage = 1;
     private int totalAvailable = 0;
     private boolean loading = false;
@@ -57,6 +60,18 @@ public class SearchViewModel extends AndroidViewModel {
     public LiveData<String> errorMessage() { return errorMessage; }
 
     public Filter currentFilter() { return currentFilter; }
+    @Nullable public String currentGenre() { return currentGenre; }
+    @Nullable public Integer currentSeason() { return currentSeason; }
+    @Nullable public Integer currentEpisode() { return currentEpisode; }
+
+    /** True when at least one non-default filter is set. Lets the SearchBar
+     *  show an "active filter" indicator without reaching into VM internals. */
+    public boolean hasActiveFilters() {
+        return currentFilter != Filter.ALL
+                || currentGenre != null
+                || currentSeason != null
+                || currentEpisode != null;
+    }
 
     public void setFilter(Filter f) {
         if (f == currentFilter) return;
@@ -64,6 +79,24 @@ public class SearchViewModel extends AndroidViewModel {
         if (!currentQuery.isEmpty()) {
             search(currentQuery);
         }
+    }
+
+    /** Apply a combined filter snapshot from the bottom sheet. */
+    public void applyFilters(@Nullable String genre, @Nullable Integer season,
+                             @Nullable Integer episode) {
+        boolean changed = !eq(genre, currentGenre)
+                || !eq(season, currentSeason)
+                || !eq(episode, currentEpisode);
+        currentGenre = genre;
+        currentSeason = season;
+        currentEpisode = episode;
+        if (changed && !currentQuery.isEmpty()) {
+            search(currentQuery);
+        }
+    }
+
+    private static boolean eq(Object a, Object b) {
+        return a == null ? b == null : a.equals(b);
     }
 
     public void search(String query) {
@@ -114,6 +147,9 @@ public class SearchViewModel extends AndroidViewModel {
                 currentPage,
                 PAGE_SIZE,
                 verifiedOnly,
+                currentGenre,
+                currentSeason,
+                currentEpisode,
                 apiKey
         );
 

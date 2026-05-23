@@ -627,12 +627,27 @@ public class TorrentManager {
             if (!ti.isValid()) throw new IllegalStateException("TorrentInfo is invalid");
 
             FileStorage files = ti.files();
-            int videoIdx = findVideoFile(files);
+            List<Integer> videoIndices = findAllVideoFiles(files);
+            // Keep one "primary" video file for the player — largest by size
+            // among the video files, falls back to the largest file overall
+            // when no extension matched.
+            int videoIdx = videoIndices.isEmpty()
+                    ? findVideoFile(files)
+                    : largestOf(files, videoIndices);
             List<Integer> subtitleIndices = findSubtitleFiles(files);
 
             Priority[] priorities = new Priority[files.numFiles()];
             for (int i = 0; i < priorities.length; i++) {
-                boolean wanted = (videoIdx < 0) || i == videoIdx || subtitleIndices.contains(i);
+                boolean isVideo = videoIndices.contains(i);
+                boolean isSub = subtitleIndices.contains(i);
+                // Multi-file torrents (e.g. full season packs): include every
+                // recognised video and subtitle; skip .nfo, .txt, .exe, .zip,
+                // sample dirs, .url shortcuts, etc.
+                boolean wanted = isVideo || isSub
+                        // Single-file torrents whose only file didn't match a
+                        // video extension — still download it (could be a
+                        // weird container like .ogm).
+                        || (videoIndices.isEmpty() && i == videoIdx);
                 priorities[i] = wanted ? Priority.DEFAULT : Priority.IGNORE;
             }
 
@@ -998,6 +1013,31 @@ public class TorrentManager {
     // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
+
+    /** Every file index whose extension looks like a playable video. */
+    private static List<Integer> findAllVideoFiles(FileStorage files) {
+        List<Integer> out = new ArrayList<>();
+        int n = files.numFiles();
+        for (int i = 0; i < n; i++) {
+            String path = files.filePath(i).toLowerCase(Locale.US);
+            // Skip "sample" subfolders — they're trailers/demos, never the
+            // real content.
+            if (path.contains("/sample/") || path.startsWith("sample/")) continue;
+            if (isExt(path, VIDEO_EXTS)) out.add(i);
+        }
+        return out;
+    }
+
+    /** Picks the largest file from the given indices. */
+    private static int largestOf(FileStorage files, List<Integer> indices) {
+        int best = -1;
+        long bestSize = -1;
+        for (int i : indices) {
+            long size = files.fileSize(i);
+            if (size > bestSize) { best = i; bestSize = size; }
+        }
+        return best;
+    }
 
     private static int findVideoFile(FileStorage files) {
         int n = files.numFiles();

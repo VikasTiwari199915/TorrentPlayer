@@ -78,6 +78,20 @@ public class SearchFragment extends Fragment {
             else vm.setFilter(SearchViewModel.Filter.ALL);
         });
 
+        // Filter icon in the SearchBar's right action opens the bottom sheet.
+        b.searchBar.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == R.id.action_filters) {
+                FiltersBottomSheet.show(
+                        getChildFragmentManager(),
+                        vm.currentGenre(),
+                        vm.currentSeason(),
+                        vm.currentEpisode(),
+                        (genre, season, episode) -> vm.applyFilters(genre, season, episode));
+                return true;
+            }
+            return false;
+        });
+
         // Edge-to-edge: lift list above the bottom nav
         ViewCompat.setOnApplyWindowInsetsListener(b.getRoot(), (view, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());

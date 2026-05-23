@@ -25,6 +25,14 @@
     <string name="filter_all">All</string>
     <string name="filter_movies">Movies</string>
     <string name="filter_shows">Shows</string>
+    <string name="action_filters">Filters</string>
+    <string name="filters_title">Search filters</string>
+    <string name="filter_genre">Genre</string>
+    <string name="filter_season">Season</string>
+    <string name="filter_episode">Episode</string>
+    <string name="filter_apply">Apply</string>
+    <string name="filter_clear">Clear all</string>
+    <string name="filter_episode_needs_season">Episode requires a season</string>
 
     <!-- Detail -->
     <string name="detail_overview">Overview</string>

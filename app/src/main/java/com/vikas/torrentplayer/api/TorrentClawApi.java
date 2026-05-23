@@ -39,6 +39,9 @@ public interface TorrentClawApi {
             @Query("page") int page,
             @Query("limit") int limit,
             @Query("verified") boolean verified,
+            @Query("genre") String genre,
+            @Query("season") Integer season,
+            @Query("episode") Integer episode,
             @Query("api_key") String apiKey
     );
 

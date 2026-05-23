@@ -95,6 +95,9 @@ public class DetailViewModel extends AndroidViewModel {
                 1,
                 25,
                 false,
+                /* genre */ null,
+                /* season */ null,
+                /* episode */ null,
                 apiKey);
         searchCall.enqueue(new Callback<SearchResponse>() {
             @Override

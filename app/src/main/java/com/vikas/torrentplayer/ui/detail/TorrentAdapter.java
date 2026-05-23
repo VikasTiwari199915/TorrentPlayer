@@ -116,10 +116,15 @@ public class TorrentAdapter extends ListAdapter<TorrentItem, TorrentAdapter.VH> 
             }
             b.source.setText(src.toString());
 
-            // Detail line: languages · resolution · audio · subs
+            // Detail line: S/E · languages · resolution · audio · subs
             StringBuilder spec = new StringBuilder();
+            String se = FormatUtils.seasonEpisodeLabel(item.season, item.episode);
+            if (se != null) spec.append(se);
             String langs = languageLabel(item.languages);
-            if (langs != null) spec.append(langs);
+            if (langs != null) {
+                if (spec.length() > 0) spec.append(" · ");
+                spec.append(langs);
+            }
             String res = item.resolutionLabel();
             if (res != null) {
                 if (spec.length() > 0) spec.append(" · ");

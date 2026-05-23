@@ -24,12 +24,23 @@ public final class FormatUtils {
         return humanBytes(bytesPerSecond) + "/s";
     }
 
-    /** "S01E03" style label when both available. */
+    /**
+     * Renders the season/episode badge for a torrent row.
+     * <ul>
+     *   <li>Both → {@code "S01E05"}</li>
+     *   <li>Season only → {@code "S01 · full season"}</li>
+     *   <li>Episode only → {@code "E05"}</li>
+     *   <li>Neither → {@code null}</li>
+     * </ul>
+     */
     public static String seasonEpisodeLabel(Integer season, Integer episode) {
         if (season == null && episode == null) return null;
-        StringBuilder sb = new StringBuilder();
-        if (season != null) sb.append(String.format(Locale.US, "S%02d", season));
-        if (episode != null) sb.append(String.format(Locale.US, "E%02d", episode));
-        return sb.toString();
+        if (season != null && episode != null) {
+            return String.format(Locale.US, "S%02dE%02d", season, episode);
+        }
+        if (season != null) {
+            return String.format(Locale.US, "S%02d · full season", season);
+        }
+        return String.format(Locale.US, "E%02d", episode);
     }
 }
