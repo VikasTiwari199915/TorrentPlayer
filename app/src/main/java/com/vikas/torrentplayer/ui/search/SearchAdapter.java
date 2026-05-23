@@ -42,7 +42,7 @@ public class SearchAdapter extends ListAdapter<SearchResult, SearchAdapter.VH> {
         holder.bind(getItem(position));
     }
 
-    class VH extends RecyclerView.ViewHolder {
+    public class VH extends RecyclerView.ViewHolder {
         private final ItemSearchResultBinding b;
 
         VH(ItemSearchResultBinding b) {

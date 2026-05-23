@@ -55,7 +55,8 @@ public class SearchFragment extends Fragment {
         });
 
         b.swipe.setOnRefreshListener(() -> {
-            String q = b.searchBar.getText() == null ? "" : b.searchBar.getText().toString();
+            b.searchBar.getText();
+            String q = b.searchBar.getText().toString();
             if (!q.isEmpty()) vm.search(q);
             else b.swipe.setRefreshing(false);
         });
