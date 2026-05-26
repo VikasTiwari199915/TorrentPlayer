@@ -23,6 +23,7 @@ import com.vikas.torrentplayer.R;
 import com.vikas.torrentplayer.databinding.FragmentDetailsListBinding;
 import com.vikas.torrentplayer.databinding.ItemFileTreeBinding;
 import com.vikas.torrentplayer.torrent.TorrentManager;
+import com.vikas.torrentplayer.tree.FileTreeNode;
 import com.vikas.torrentplayer.utils.FormatUtils;
 
 import org.libtorrent4j.FileStorage;

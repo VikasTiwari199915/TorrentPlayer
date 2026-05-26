@@ -3,11 +3,15 @@ package com.vikas.torrentplayer.utils;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-import androidx.preference.PreferenceManager;
-
 /**
  * Thin wrapper around SharedPreferences for app-wide settings.
- * Keys here MUST match those in res/xml/preferences.xml.
+ *
+ * <p>The SharedPreferences name mirrors what {@code PreferenceManager
+ * .getDefaultSharedPreferences()} would have used —
+ * {@code "<pkg>_preferences"} — so the phone's PreferenceFragmentCompat keeps
+ * reading/writing the same store.
+ *
+ * <p>Keys here MUST match the keys declared in each app's preferences.xml.
  */
 public final class PrefsManager {
 
@@ -19,7 +23,10 @@ public final class PrefsManager {
     private final SharedPreferences sp;
 
     public PrefsManager(Context context) {
-        this.sp = PreferenceManager.getDefaultSharedPreferences(context.getApplicationContext());
+        Context app = context.getApplicationContext();
+        this.sp = app.getSharedPreferences(
+                app.getPackageName() + "_preferences",
+                Context.MODE_PRIVATE);
     }
 
     public String getApiKey() {

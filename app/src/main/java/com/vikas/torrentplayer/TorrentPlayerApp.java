@@ -6,13 +6,8 @@ import com.google.android.material.color.DynamicColors;
 import com.vikas.torrentplayer.service.TorrentDownloadService;
 
 /**
- * Application entry point.
- * <ul>
- *   <li>Wires Material 3 dynamic colors ("Material You") across all activities.</li>
- *   <li>Starts {@link TorrentDownloadService} as a foreground service so the
- *       libtorrent session and the user's downloads survive the app being
- *       backgrounded / killed.</li>
- * </ul>
+ * Phone application entry point. Configures the engine's foreground service
+ * with phone-specific resources, then starts it.
  */
 public class TorrentPlayerApp extends Application {
 
@@ -20,8 +15,13 @@ public class TorrentPlayerApp extends Application {
     public void onCreate() {
         super.onCreate();
         DynamicColors.applyToActivitiesIfAvailable(this);
-        // Start the foreground service. The service initialises TorrentManager
-        // and restores any persisted downloads from Room.
+
+        TorrentDownloadService.configure(new TorrentDownloadService.Config(
+                MainActivity.class,
+                R.drawable.rounded_download_24,
+                getString(R.string.app_name),
+                getString(R.string.notif_idle_text)
+        ));
         TorrentDownloadService.start(this);
     }
 }

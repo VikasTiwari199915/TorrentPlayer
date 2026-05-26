@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "com.vikas.torrentplayer"
+    namespace = "com.vikas.torrentplayer.tv"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -11,8 +11,9 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.vikas.torrentplayer"
-        minSdk = 31
+        applicationId = "com.vikas.torrentplayer.tv"
+        // TV minSdk — the device you have is API 30 (Android 11).
+        minSdk = 30
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
@@ -48,11 +49,8 @@ android {
                 "META-INF/DEPENDENCIES",
                 "META-INF/LICENSE",
                 "META-INF/LICENSE.txt",
-                "META-INF/license.txt",
                 "META-INF/NOTICE",
                 "META-INF/NOTICE.txt",
-                "META-INF/notice.txt",
-                "META-INF/ASL2.0",
                 "META-INF/*.kotlin_module"
             )
         }
@@ -63,26 +61,17 @@ android {
 }
 
 dependencies {
-    // Engine — API client, libtorrent, Room, service, ExoPlayer DataSource.
     implementation(project(":core"))
 
-    implementation(libs.activity.ktx)
-    implementation(libs.constraintlayout)
-    implementation(libs.material)
-    implementation(libs.fragment)
-    implementation(libs.recyclerview)
-    implementation(libs.swiperefreshlayout)
+    // Leanback — TV UI toolkit
+    implementation(libs.leanback)
+    implementation(libs.leanback.preference)
+    implementation(libs.tvprovider)
 
-    implementation(libs.navigation.fragment)
-    implementation(libs.navigation.ui)
-
-    implementation(libs.preference)
-
+    // Image loading
     implementation(libs.glide)
 
-    // Media3 player UI for the phone PlayerActivity.
+    // ExoPlayer UI (leanback variant has a TV-style controller)
     implementation(libs.media3.ui)
     implementation(libs.media3.session)
-
-    implementation(libs.viewpager2)
 }

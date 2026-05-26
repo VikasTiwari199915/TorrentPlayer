@@ -1,0 +1,11 @@
+<resources>
+    <style name="Theme.TorrentPlayerTv" parent="Theme.Leanback.Browse" />
+
+    <style name="Theme.TorrentPlayerTv.Details" parent="Theme.Leanback.Details" />
+
+    <style name="Theme.TorrentPlayerTv.Player" parent="Theme.Leanback">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:statusBarColor">@android:color/black</item>
+        <item name="android:navigationBarColor">@android:color/black</item>
+    </style>
+</resources>

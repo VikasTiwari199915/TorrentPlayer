@@ -52,10 +52,8 @@
             android:screenOrientation="sensorLandscape"
             android:theme="@style/Theme.TorrentPlayer.Player" />
 
-        <service
-            android:name=".service.TorrentDownloadService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
+        <!-- TorrentDownloadService is declared in :core's manifest and merged
+             in automatically. -->
 
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -1,6 +1,6 @@
 package com.vikas.torrentplayer.api;
 
-import com.vikas.torrentplayer.BuildConfig;
+import com.vikas.torrentplayer.core.BuildConfig;
 
 import java.util.concurrent.TimeUnit;
 

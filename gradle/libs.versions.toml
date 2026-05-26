@@ -19,6 +19,9 @@ libtorrent4j = "2.1.0-39"
 room = "2.6.1"
 viewpager2 = "1.1.0"
 torrentstream = "2.7.0"
+leanback = "1.0.0"
+leanback-preference = "1.0.0"
+tvprovider = "1.0.0"
 
 [libraries]
 appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
@@ -62,5 +65,11 @@ viewpager2 = { group = "androidx.viewpager2", name = "viewpager2", version.ref =
 
 torrentstream = { group = "com.github.TorrentStream", name = "TorrentStream-Android", version.ref = "torrentstream" }
 
+# AndroidX Leanback — UI toolkit for Android TV
+leanback = { group = "androidx.leanback", name = "leanback", version.ref = "leanback" }
+leanback-preference = { group = "androidx.leanback", name = "leanback-preference", version.ref = "leanback-preference" }
+tvprovider = { group = "androidx.tvprovider", name = "tvprovider", version.ref = "tvprovider" }
+
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }

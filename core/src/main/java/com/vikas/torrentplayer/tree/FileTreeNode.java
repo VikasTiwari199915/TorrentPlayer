@@ -1,4 +1,4 @@
-package com.vikas.torrentplayer.ui.downloads;
+package com.vikas.torrentplayer.tree;
 
 import org.libtorrent4j.FileStorage;
 

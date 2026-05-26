@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder banner. TV banners should be 320×180 px. Replace with a real
+     PNG/WebP for a polished look. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#7B5BFF" />
+        </shape>
+    </item>
+    <item android:gravity="center">
+        <bitmap
+            android:src="@android:drawable/ic_media_play"
+            android:tint="#FFFFFF" />
+    </item>
+</layer-list>

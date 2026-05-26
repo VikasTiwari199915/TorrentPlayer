@@ -1,5 +1,6 @@
 package com.vikas.torrentplayer.service;
 
+import android.app.Activity;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -9,19 +10,18 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.util.Log;
 
-import android.os.Handler;
-import android.os.Looper;
-
+import androidx.annotation.DrawableRes;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 import androidx.lifecycle.Observer;
 
-import com.vikas.torrentplayer.MainActivity;
-import com.vikas.torrentplayer.R;
 import com.vikas.torrentplayer.torrent.DownloadHandle;
 import com.vikas.torrentplayer.torrent.TorrentManager;
 import com.vikas.torrentplayer.utils.FormatUtils;
@@ -31,17 +31,45 @@ import java.util.List;
 /**
  * Foreground service that owns the libtorrent session for its entire lifetime.
  *
- * <p>Without this, the session lives inside the app process and Android can
- * kill it at any moment when the user backgrounds or closes the app, dropping
- * all downloads. Promoting to a foreground service with a persistent
- * notification keeps the process alive and signals "this app is doing real
- * work" to the OS scheduler.
+ * <p>The service has no UI/resource references baked in — host apps configure
+ * it via {@link #configure(Config)} before starting it. That keeps the engine
+ * module strictly UI-agnostic so both the phone and TV apps can share it.
  */
 public class TorrentDownloadService extends Service {
 
     private static final String TAG = "TorrentDownloadService";
     private static final String CHANNEL_ID = "torrents_download";
     private static final int NOTIFICATION_ID = 0xD0;
+
+    /**
+     * Per-app config supplied by the host {@code Application} before the
+     * service starts. Static lifetime is fine — there's only one running
+     * service per process.
+     */
+    public static final class Config {
+        public final Class<? extends Activity> launcherActivity;
+        @DrawableRes public final int notificationIconRes;
+        public final String notificationTitle;
+        public final String idleText;
+
+        public Config(@NonNull Class<? extends Activity> launcherActivity,
+                      @DrawableRes int notificationIconRes,
+                      @NonNull String notificationTitle,
+                      @NonNull String idleText) {
+            this.launcherActivity = launcherActivity;
+            this.notificationIconRes = notificationIconRes;
+            this.notificationTitle = notificationTitle;
+            this.idleText = idleText;
+        }
+    }
+
+    private static volatile Config sConfig;
+
+    /** Host apps call this from {@code Application.onCreate()} before
+     *  {@link #start(Context)} so the notification has valid content. */
+    public static void configure(@NonNull Config config) {
+        sConfig = config;
+    }
 
     public static void start(Context ctx) {
         Intent i = new Intent(ctx, TorrentDownloadService.class);
@@ -57,9 +85,6 @@ public class TorrentDownloadService extends Service {
     private final Handler refreshHandler = new Handler(Looper.getMainLooper());
     private final Runnable refreshTick = new Runnable() {
         @Override public void run() {
-            // Pull the latest snapshot from TorrentManager every 2s. LiveData
-            // only fires when the LIST changes, so this is what keeps the
-            // progress in the notification ticking up.
             updateForCurrentDownloads(TorrentManager.get().downloads().getValue());
             refreshHandler.postDelayed(this, 2_000L);
         }
@@ -70,8 +95,7 @@ public class TorrentDownloadService extends Service {
         super.onCreate();
         ensureChannel();
 
-        // Promote immediately — Android allows up to 5s after startForegroundService.
-        Notification n = buildNotification(getString(R.string.notif_idle_text), 0, false);
+        Notification n = buildNotification(idleText(), 0, false);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE /* 34 */) {
             startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
         } else {
@@ -85,8 +109,6 @@ public class TorrentDownloadService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // START_STICKY: if Android kills us under memory pressure we'll come
-        // back; the TorrentManager will rehydrate downloads from Room.
         return START_STICKY;
     }
 
@@ -99,9 +121,6 @@ public class TorrentDownloadService extends Service {
     @Override
     public void onTaskRemoved(Intent rootIntent) {
         super.onTaskRemoved(rootIntent);
-        // When the user swipes the app from recents, only keep running if
-        // there's actually a download in flight. Otherwise stop self so we
-        // don't hold a wakelock / foreground notification forever.
         if (countActiveDownloads() == 0) {
             Log.i(TAG, "task removed and no active downloads — stopping service");
             stopForeground(STOP_FOREGROUND_REMOVE);
@@ -132,9 +151,6 @@ public class TorrentDownloadService extends Service {
         return n;
     }
 
-    /**
-     * Recompute notification text/progress from the current set of downloads.
-     */
     private void updateForCurrentDownloads(List<DownloadHandle> all) {
         int active = 0;
         int totalProgress = 0;
@@ -159,12 +175,12 @@ public class TorrentDownloadService extends Service {
         boolean indeterminate;
         int progress;
         if (active == 0) {
-            text = getString(R.string.notif_idle_text);
+            text = idleText();
             indeterminate = false;
             progress = 0;
         } else if (active == 1) {
             text = (highlight != null ? highlight + " · " : "")
-                    + (totalProgress) + "%  ·  "
+                    + totalProgress + "%  ·  "
                     + FormatUtils.humanSpeed(totalSpeed);
             indeterminate = totalProgress == 0;
             progress = totalProgress;
@@ -181,27 +197,35 @@ public class TorrentDownloadService extends Service {
     }
 
     private Notification buildNotification(String text, int progress, boolean indeterminate) {
-        Intent open = new Intent(this, MainActivity.class);
-        open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        PendingIntent pi = PendingIntent.getActivity(
-                this, 0, open,
-                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        Config cfg = sConfig;
+        @DrawableRes int icon = cfg != null ? cfg.notificationIconRes : android.R.drawable.stat_sys_download;
+        String title = cfg != null ? cfg.notificationTitle : "Downloads";
+
+        PendingIntent pi = null;
+        if (cfg != null) {
+            Intent open = new Intent(this, cfg.launcherActivity);
+            open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            pi = PendingIntent.getActivity(this, 0, open,
+                    PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        }
 
         NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(R.drawable.rounded_download_24)
-                .setContentTitle(getString(R.string.app_name))
+                .setSmallIcon(icon)
+                .setContentTitle(title)
                 .setContentText(text)
-                .setContentIntent(pi)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
                 .setCategory(NotificationCompat.CATEGORY_PROGRESS);
-
-        if (progress > 0 || indeterminate) {
-            b.setProgress(100, progress, indeterminate);
-        }
+        if (pi != null) b.setContentIntent(pi);
+        if (progress > 0 || indeterminate) b.setProgress(100, progress, indeterminate);
 
         return b.build();
+    }
+
+    private String idleText() {
+        Config cfg = sConfig;
+        return cfg != null ? cfg.idleText : "Ready";
     }
 
     private void ensureChannel() {
@@ -209,9 +233,7 @@ public class TorrentDownloadService extends Service {
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm == null || nm.getNotificationChannel(CHANNEL_ID) != null) return;
         NotificationChannel ch = new NotificationChannel(
-                CHANNEL_ID,
-                "Downloads",
-                NotificationManager.IMPORTANCE_LOW);
+                CHANNEL_ID, "Downloads", NotificationManager.IMPORTANCE_LOW);
         ch.setDescription("Torrent download progress");
         ch.setShowBadge(false);
         nm.createNotificationChannel(ch);

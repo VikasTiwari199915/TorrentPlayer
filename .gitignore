@@ -5,7 +5,9 @@
 .claude
 .idea
 .DS_Store
-/build
+tv/build
+app/build
+core/build
 /captures
 .externalNativeBuild
 .cxx
