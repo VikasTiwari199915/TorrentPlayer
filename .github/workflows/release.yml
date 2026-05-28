@@ -32,11 +32,22 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      # Build both signed APKs in a single Gradle invocation so the daemon /
-      # config cache only spin up once. :core (Android library) is pulled in
-      # transitively by both consumers.
+      # Drive versionName/versionCode from the git tag so every release APK
+      # actually advertises its real version. Without this both modules read
+      # the hard-coded fallback in build.gradle.kts and the in-app auto-
+      # updater keeps prompting forever.
+      - name: Compute release version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building versionName=${VERSION}"
+
       - name: Build Signed APKs (phone + TV)
-        run: ./gradlew :app:assembleRelease :tv:assembleRelease --stacktrace
+        run: |
+          ./gradlew :app:assembleRelease :tv:assembleRelease \
+            -PversionName=${{ steps.version.outputs.version }} \
+            --stacktrace
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -46,15 +57,13 @@ jobs:
       # and the build flavour ("app" / "tv"). The in-app AppAutoUpdater filters
       # release assets by substring — phone looks for "app", TV looks for "tv".
       - name: Stage release artifacts
-        id: stage
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${{ steps.version.outputs.version }}"
           mkdir -p release-artifacts
           cp app/build/outputs/apk/release/app-release.apk \
              "release-artifacts/torrentplayer-app-${VERSION}.apk"
           cp tv/build/outputs/apk/release/tv-release.apk \
              "release-artifacts/torrentplayer-tv-${VERSION}.apk"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           ls -la release-artifacts/
 
       - name: Verify APKs exist
@@ -65,10 +74,10 @@ jobs:
       - name: Upload Signed APKs to Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "v${{ steps.stage.outputs.version }}"
+          name: "v${{ steps.version.outputs.version }}"
           tag_name: ${{ github.ref_name }}
           files: |
-            release-artifacts/torrentplayer-app-${{ steps.stage.outputs.version }}.apk
-            release-artifacts/torrentplayer-tv-${{ steps.stage.outputs.version }}.apk
+            release-artifacts/torrentplayer-app-${{ steps.version.outputs.version }}.apk
+            release-artifacts/torrentplayer-tv-${{ steps.version.outputs.version }}.apk
           generate_release_notes: true
           draft: false

@@ -26,6 +26,8 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.vikas.torrentplayer.BuildConfig;
 import com.vikas.torrentplayer.R;
 import com.vikas.torrentplayer.torrent.TorrentManager;
+import com.vikas.torrentplayer.utils.AppAutoUpdater;
+import com.vikas.torrentplayer.utils.AppUpdateListener;
 import com.vikas.torrentplayer.utils.CacheCleaner;
 import com.vikas.torrentplayer.utils.FormatUtils;
 import com.vikas.torrentplayer.utils.PrefsManager;
@@ -75,6 +77,66 @@ public class SettingsFragment extends PreferenceFragmentCompat
                 return true;
             });
         }
+
+        Preference checkUpdates = findPreference("pref_check_updates");
+        if (checkUpdates != null) {
+            checkUpdates.setSummary(getString(
+                    R.string.pref_check_updates_summary_fmt, BuildConfig.VERSION_NAME));
+            checkUpdates.setOnPreferenceClickListener(p -> {
+                runManualUpdateCheck();
+                return true;
+            });
+        }
+    }
+
+    /** Manual update check from settings: shows feedback for every outcome
+     *  (the auto-check on launch is silent on up-to-date / error to avoid
+     *  pestering the user). */
+    private void runManualUpdateCheck() {
+        Toast.makeText(requireContext(), "Checking…", Toast.LENGTH_SHORT).show();
+        AppAutoUpdater.checkForUpdates(requireContext(), new AppUpdateListener() {
+            @Override
+            public void onUpdateAvailable(String currentVersion, String latestVersion, String downloadUrl) {
+                if (!isAdded()) return;
+                new MaterialAlertDialogBuilder(requireContext())
+                        .setTitle(R.string.update_dialog_title)
+                        .setMessage(getString(R.string.update_dialog_message, latestVersion, currentVersion))
+                        .setNegativeButton(R.string.update_dialog_later, null)
+                        .setPositiveButton(R.string.update_dialog_install, (d, w) -> {
+                            // Delegate to MainActivity's existing download flow.
+                            // Simpler: just kick off the download here.
+                            AppAutoUpdater.downloadAndInstall(requireContext(),
+                                    downloadUrl, latestVersion, new AppUpdateListener() {
+                                        @Override
+                                        public void onUpdateAvailable(String c, String l, String u) {}
+                                        @Override
+                                        public void onError(Throwable t) {
+                                            if (!isAdded()) return;
+                                            Toast.makeText(requireContext(),
+                                                    getString(R.string.update_download_failed,
+                                                            String.valueOf(t.getMessage())),
+                                                    Toast.LENGTH_LONG).show();
+                                        }
+                                    });
+                        })
+                        .show();
+            }
+            @Override
+            public void onUpToDate(String currentVersion) {
+                if (!isAdded()) return;
+                Toast.makeText(requireContext(),
+                        getString(R.string.update_up_to_date_fmt, currentVersion),
+                        Toast.LENGTH_LONG).show();
+            }
+            @Override
+            public void onError(Throwable t) {
+                if (!isAdded()) return;
+                String msg = t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
+                Toast.makeText(requireContext(),
+                        getString(R.string.update_check_failed_fmt, msg),
+                        Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     /** Tap on the save-folder row — fire ACTION_VIEW so the system Files app

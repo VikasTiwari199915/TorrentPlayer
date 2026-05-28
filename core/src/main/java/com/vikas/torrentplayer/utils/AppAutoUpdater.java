@@ -92,37 +92,63 @@ public final class AppAutoUpdater {
             return;
         }
         final String currentVersion = getAppVersionName(context);
+        Log.i(TAG, "check: current=" + currentVersion
+                + " repo=" + sOwner + "/" + sRepo
+                + " filter=" + (sAssetNameContains == null ? "<any>" : sAssetNameContains));
+
         GitHubApiService api = ApiClient.github();
         api.getReleases(sOwner, sRepo).enqueue(new Callback<List<GithubRelease>>() {
             @Override
             public void onResponse(@NonNull Call<List<GithubRelease>> call,
                                    @NonNull retrofit2.Response<List<GithubRelease>> response) {
-                if (!response.isSuccessful() || response.body() == null) {
-                    listener.onError(new IOException("GitHub HTTP " + response.code()));
+                if (!response.isSuccessful()) {
+                    Log.w(TAG, "check: HTTP " + response.code()
+                            + " — verify owner/repo are right and the repo is public");
+                    listener.onError(new IOException("GitHub HTTP " + response.code()
+                            + " for repos/" + sOwner + "/" + sRepo + "/releases"));
                     return;
                 }
+                List<GithubRelease> releases = response.body();
+                if (releases == null || releases.isEmpty()) {
+                    Log.i(TAG, "check: repo has no releases yet");
+                    listener.onUpToDate(currentVersion);
+                    return;
+                }
+                Log.i(TAG, "check: " + releases.size() + " release(s) returned");
+
                 String bestVersion = "";
                 String bestUrl = "";
-                for (GithubRelease release : response.body()) {
-                    if (release == null
-                            || release.isDraft()
-                            || release.isPrerelease()
-                            || release.getTagName() == null) {
+                for (GithubRelease release : releases) {
+                    if (release == null || release.getTagName() == null) continue;
+                    if (release.isDraft()) {
+                        Log.i(TAG, "  skip " + release.getTagName() + " — draft");
+                        continue;
+                    }
+                    if (release.isPrerelease()) {
+                        Log.i(TAG, "  skip " + release.getTagName() + " — pre-release");
                         continue;
                     }
                     String tag = release.getTagName();
                     String candidate = bestVersion.isEmpty() ? currentVersion : bestVersion;
-                    if (!isNewVersionAvailable(candidate, tag)) continue;
-
+                    if (!isNewVersionAvailable(candidate, tag)) {
+                        Log.i(TAG, "  skip " + tag + " — not newer than " + candidate);
+                        continue;
+                    }
                     String url = findApkAssetUrl(release.getAssets());
-                    if (url == null) continue;
-
+                    if (url == null) {
+                        Log.i(TAG, "  skip " + tag + " — no matching APK asset (filter=\""
+                                + sAssetNameContains + "\")");
+                        continue;
+                    }
                     bestVersion = stripVersionPrefix(tag);
                     bestUrl = url;
+                    Log.i(TAG, "  candidate " + tag + " → " + url);
                 }
                 if (bestVersion.isEmpty()) {
+                    Log.i(TAG, "check: up to date");
                     listener.onUpToDate(currentVersion);
                 } else {
+                    Log.i(TAG, "check: update " + currentVersion + " → " + bestVersion);
                     listener.onUpdateAvailable(currentVersion, bestVersion, bestUrl);
                 }
             }

@@ -46,6 +46,10 @@
 
     <PreferenceCategory app:title="@string/pref_cat_about">
         <Preference
+            android:key="pref_check_updates"
+            android:title="@string/pref_check_updates_title"
+            android:icon="@drawable/rounded_download_24" />
+        <Preference
             android:key="pref_version"
             android:title="@string/pref_version_title"
             android:selectable="false" />

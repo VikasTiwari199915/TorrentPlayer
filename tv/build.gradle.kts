@@ -2,6 +2,15 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
+/** Mirror of the helper in :app/build.gradle.kts. Keeps both modules in lock-step. */
+fun versionStringToCode(v: String): Int {
+    val parts = v.split(".")
+    val major = parts.getOrNull(0)?.takeWhile(Char::isDigit)?.toIntOrNull() ?: 1
+    val minor = parts.getOrNull(1)?.takeWhile(Char::isDigit)?.toIntOrNull() ?: 0
+    val patch = parts.getOrNull(2)?.takeWhile(Char::isDigit)?.toIntOrNull() ?: 0
+    return major * 10_000 + minor * 100 + patch
+}
+
 android {
     namespace = "com.vikas.torrentplayer.tv"
     compileSdk {
@@ -10,13 +19,16 @@ android {
         }
     }
 
+    val releaseVersionName: String =
+        (project.findProperty("versionName") as String?) ?: "1.0.1"
+
     defaultConfig {
         applicationId = "com.vikas.torrentplayer.tv"
         // TV minSdk — the device you have is API 30 (Android 11).
         minSdk = 30
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0.1"
+        versionCode = versionStringToCode(releaseVersionName)
+        versionName = releaseVersionName
 
         ndk {
             //noinspection ChromeOsAbiSupport

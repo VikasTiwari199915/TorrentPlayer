@@ -100,6 +100,11 @@
     <string name="notif_idle_text">Ready</string>
 
     <!-- Auto-updater -->
+    <string name="pref_check_updates_title">Check for updates</string>
+    <string name="pref_check_updates_summary_fmt">You\'re on %1$s</string>
+    <string name="update_up_to_date_fmt">You\'re on the latest version (%1$s)</string>
+    <string name="update_check_failed_fmt">Update check failed: %1$s</string>
+
     <string name="update_dialog_title">Update available</string>
     <string name="update_dialog_message">A new version (%1$s) is available. You\'re on %2$s.\n\nDownload and install?</string>
     <string name="update_dialog_install">Install</string>

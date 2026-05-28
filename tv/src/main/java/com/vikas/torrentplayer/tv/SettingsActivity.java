@@ -19,6 +19,8 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.vikas.torrentplayer.torrent.TorrentManager;
+import com.vikas.torrentplayer.utils.AppAutoUpdater;
+import com.vikas.torrentplayer.utils.AppUpdateListener;
 import com.vikas.torrentplayer.utils.CacheCleaner;
 import com.vikas.torrentplayer.utils.FormatUtils;
 import com.vikas.torrentplayer.utils.PrefsManager;
@@ -35,6 +37,7 @@ public class SettingsActivity extends FragmentActivity {
     private static final int ITEM_API_KEY = 0;
     private static final int ITEM_SAVE_DIR = 1;
     private static final int ITEM_CLEAR_CACHE = 2;
+    private static final int ITEM_CHECK_UPDATES = 3;
 
     private PrefsManager prefs;
     private RowsAdapter adapter;
@@ -126,9 +129,53 @@ public class SettingsActivity extends FragmentActivity {
         });
     }
 
+    private void runManualUpdateCheck() {
+        Toast.makeText(this, "Checking…", Toast.LENGTH_SHORT).show();
+        AppAutoUpdater.checkForUpdates(this, new AppUpdateListener() {
+            @Override
+            public void onUpdateAvailable(String currentVersion, String latestVersion, String downloadUrl) {
+                if (isFinishing() || isDestroyed()) return;
+                new AlertDialog.Builder(SettingsActivity.this)
+                        .setTitle("Update available")
+                        .setMessage("New: " + latestVersion + "\nYou: " + currentVersion
+                                + "\n\nDownload and install?")
+                        .setNegativeButton("Later", null)
+                        .setPositiveButton("Install", (d, w) ->
+                                AppAutoUpdater.downloadAndInstall(SettingsActivity.this,
+                                        downloadUrl, latestVersion, new AppUpdateListener() {
+                                            @Override
+                                            public void onUpdateAvailable(String c, String l, String u) {}
+                                            @Override
+                                            public void onError(Throwable t) {
+                                                if (isFinishing() || isDestroyed()) return;
+                                                Toast.makeText(SettingsActivity.this,
+                                                        "Download failed: " + t.getMessage(),
+                                                        Toast.LENGTH_LONG).show();
+                                            }
+                                        }))
+                        .show();
+            }
+            @Override
+            public void onUpToDate(String currentVersion) {
+                if (isFinishing() || isDestroyed()) return;
+                Toast.makeText(SettingsActivity.this,
+                        "You're on the latest version (" + currentVersion + ")",
+                        Toast.LENGTH_LONG).show();
+            }
+            @Override
+            public void onError(Throwable t) {
+                if (isFinishing() || isDestroyed()) return;
+                String msg = t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
+                Toast.makeText(SettingsActivity.this,
+                        "Update check failed: " + msg,
+                        Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
     private class RowsAdapter extends RecyclerView.Adapter<RowsAdapter.VH> {
         private final List<Integer> rows = Arrays.asList(
-                ITEM_API_KEY, ITEM_SAVE_DIR, ITEM_CLEAR_CACHE);
+                ITEM_API_KEY, ITEM_SAVE_DIR, ITEM_CLEAR_CACHE, ITEM_CHECK_UPDATES);
 
         @NonNull @Override
         public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
@@ -169,6 +216,11 @@ public class SettingsActivity extends FragmentActivity {
                     t2.setText("Free " + FormatUtils.humanBytes(bytes)
                             + " — settings will be kept");
                     h.itemView.setOnClickListener(v -> showClearCacheDialog());
+                    break;
+                case ITEM_CHECK_UPDATES:
+                    t1.setText("Check for updates");
+                    t2.setText("You're on " + AppAutoUpdater.getAppVersionName(h.itemView.getContext()));
+                    h.itemView.setOnClickListener(v -> runManualUpdateCheck());
                     break;
             }
         }

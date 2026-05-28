@@ -2,6 +2,22 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
+/**
+ * Maps a dotted version string into a single integer so the workflow can drive
+ * both versionName and versionCode from a single source (the git tag).
+ *
+ *   "1.0.2"      -> 1_00_02 = 10002
+ *   "1.2.3"      -> 1_02_03 = 10203
+ *   "1.0-dev"    -> non-numeric tails ignored → 10000
+ */
+fun versionStringToCode(v: String): Int {
+    val parts = v.split(".")
+    val major = parts.getOrNull(0)?.takeWhile(Char::isDigit)?.toIntOrNull() ?: 1
+    val minor = parts.getOrNull(1)?.takeWhile(Char::isDigit)?.toIntOrNull() ?: 0
+    val patch = parts.getOrNull(2)?.takeWhile(Char::isDigit)?.toIntOrNull() ?: 0
+    return major * 10_000 + minor * 100 + patch
+}
+
 android {
     namespace = "com.vikas.torrentplayer"
     compileSdk {
@@ -10,12 +26,17 @@ android {
         }
     }
 
+    // CI passes -PversionName=<tag-minus-v> so the APK actually reports the
+    // release version. Local builds fall back to the literal string below.
+    val releaseVersionName: String =
+        (project.findProperty("versionName") as String?) ?: "1.0.1"
+
     defaultConfig {
         applicationId = "com.vikas.torrentplayer"
         minSdk = 31
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0.1"
+        versionCode = versionStringToCode(releaseVersionName)
+        versionName = releaseVersionName
 
         ndk {
             //noinspection ChromeOsAbiSupport
