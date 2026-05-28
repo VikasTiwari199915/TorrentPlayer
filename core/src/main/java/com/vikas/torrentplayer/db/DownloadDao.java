@@ -22,6 +22,10 @@ public interface DownloadDao {
     @Query("DELETE FROM downloads WHERE infoHash = :hash")
     void deleteByHash(String hash);
 
+    /** Used by CacheCleaner to wipe every persisted download row at once. */
+    @Query("DELETE FROM downloads")
+    void deleteAll();
+
     @Query("UPDATE downloads SET lastState = :state, lastProgress = :progress WHERE infoHash = :hash")
     void updateProgress(String hash, int state, int progress);
 

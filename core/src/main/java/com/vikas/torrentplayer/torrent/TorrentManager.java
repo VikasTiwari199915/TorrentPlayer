@@ -162,14 +162,16 @@ public class TorrentManager {
         io.execute(this::restoreFromDb);
     }
 
-    /** Periodic kick — libtorrent only fires STATE_UPDATE if we ask. */
+    /** Periodic kick — libtorrent only fires STATE_UPDATE if we ask. 2s is
+     *  fine for human-perceived progress and noticeably cheaper than 1s on
+     *  weak TV CPUs where every alert round-trip costs. */
     private final Runnable statusPoller = new Runnable() {
         @Override public void run() {
             if (session != null) {
                 try { session.postTorrentUpdates(); }
                 catch (Throwable t) { Log.w(TAG, "postTorrentUpdates failed", t); }
             }
-            main.postDelayed(this, 1000);
+            main.postDelayed(this, 2000);
         }
     };
 
@@ -409,6 +411,33 @@ public class TorrentManager {
         if (resume.exists()) //noinspection ResultOfMethodCallIgnored
             resume.delete();
         io.execute(() -> dao.deleteByHash(infoHash));
+        publishList();
+    }
+
+    /**
+     * Used by {@link com.vikas.torrentplayer.utils.CacheCleaner}: removes every
+     * tracked torrent from libtorrent + clears our in-memory maps without
+     * touching SharedPreferences or the DB (the cleaner does both itself).
+     */
+    public synchronized void removeAllSilently(boolean deleteFiles) {
+        if (session == null) return;
+        java.util.List<String> hashes = new java.util.ArrayList<>(handles.keySet());
+        for (String hash : hashes) {
+            TorrentRecord rec = records.remove(hash);
+            handles.remove(hash);
+            if (rec != null && rec.hash != null) {
+                try {
+                    TorrentHandle th = session.find(rec.hash);
+                    if (th != null && th.isValid()) {
+                        if (deleteFiles) session.remove(th, SessionHandle.DELETE_FILES);
+                        else session.remove(th);
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "removeAllSilently: failed for " + hash, t);
+                }
+            }
+        }
+        active.postValue(null);
         publishList();
     }
 

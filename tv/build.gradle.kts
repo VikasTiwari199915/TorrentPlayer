@@ -14,9 +14,9 @@ android {
         applicationId = "com.vikas.torrentplayer.tv"
         // TV minSdk — the device you have is API 30 (Android 11).
         minSdk = 30
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.1"
 
         ndk {
             //noinspection ChromeOsAbiSupport

@@ -3,7 +3,6 @@ package com.vikas.torrentplayer.tv;
 // Platform AlertDialog — Leanback themes don't extend Theme.AppCompat so the
 // androidx.appcompat version isn't available here.
 import android.app.AlertDialog;
-import android.content.Context;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.LayoutInflater;
@@ -12,6 +11,7 @@ import android.view.ViewGroup;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.fragment.app.FragmentActivity;
@@ -19,19 +19,22 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.vikas.torrentplayer.torrent.TorrentManager;
+import com.vikas.torrentplayer.utils.CacheCleaner;
+import com.vikas.torrentplayer.utils.FormatUtils;
 import com.vikas.torrentplayer.utils.PrefsManager;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.Executors;
 
 /**
- * Minimal TV settings: API key + the (read-only) save folder. Keeps things
- * d-pad friendly with focusable rows; no preference fragment magic.
+ * D-pad-friendly settings list: API key, current save folder, clear-cache.
  */
 public class SettingsActivity extends FragmentActivity {
 
     private static final int ITEM_API_KEY = 0;
     private static final int ITEM_SAVE_DIR = 1;
+    private static final int ITEM_CLEAR_CACHE = 2;
 
     private PrefsManager prefs;
     private RowsAdapter adapter;
@@ -85,8 +88,47 @@ public class SettingsActivity extends FragmentActivity {
                 .show();
     }
 
+    private void showSaveDirDialog() {
+        String path = TorrentManager.get().getSaveDir() != null
+                ? TorrentManager.get().getSaveDir().getAbsolutePath()
+                : "—";
+        long size = CacheCleaner.getCacheSize(this);
+        new AlertDialog.Builder(this)
+                .setTitle("Save folder")
+                .setMessage(path + "\n\nUsing " + FormatUtils.humanBytes(size))
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
+    private void showClearCacheDialog() {
+        long bytes = CacheCleaner.getCacheSize(this);
+        new AlertDialog.Builder(this)
+                .setTitle("Clear downloads & cache")
+                .setMessage("This will delete every downloaded torrent and clear ~"
+                        + FormatUtils.humanBytes(bytes)
+                        + " of cached data. Settings and the API key will be kept. Continue?")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Clear", (d, w) -> runClear())
+                .show();
+    }
+
+    private void runClear() {
+        Toast.makeText(this, "Clearing…", Toast.LENGTH_SHORT).show();
+        Executors.newSingleThreadExecutor().execute(() -> {
+            long freed = CacheCleaner.clearAll(getApplicationContext());
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                adapter.notifyDataSetChanged();
+                Toast.makeText(SettingsActivity.this,
+                        "Freed " + FormatUtils.humanBytes(freed),
+                        Toast.LENGTH_LONG).show();
+            });
+        });
+    }
+
     private class RowsAdapter extends RecyclerView.Adapter<RowsAdapter.VH> {
-        private final List<Integer> rows = Arrays.asList(ITEM_API_KEY, ITEM_SAVE_DIR);
+        private final List<Integer> rows = Arrays.asList(
+                ITEM_API_KEY, ITEM_SAVE_DIR, ITEM_CLEAR_CACHE);
 
         @NonNull @Override
         public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
@@ -109,18 +151,24 @@ public class SettingsActivity extends FragmentActivity {
                 case ITEM_API_KEY:
                     t1.setText("API key");
                     String key = prefs.getApiKey();
-                    t2.setText(key == null || key.isEmpty()
-                            ? "Not set"
-                            : maskKey(key));
+                    t2.setText(key == null || key.isEmpty() ? "Not set" : maskKey(key));
                     h.itemView.setOnClickListener(v -> showApiKeyDialog());
                     break;
                 case ITEM_SAVE_DIR:
                     t1.setText("Save folder");
-                    Context ctx = h.itemView.getContext();
-                    t2.setText(TorrentManager.get().getSaveDir() != null
+                    String path = TorrentManager.get().getSaveDir() != null
                             ? TorrentManager.get().getSaveDir().getAbsolutePath()
-                            : "—");
-                    h.itemView.setOnClickListener(null);
+                            : "—";
+                    long size = CacheCleaner.getCacheSize(h.itemView.getContext());
+                    t2.setText(path + "  ·  " + FormatUtils.humanBytes(size));
+                    h.itemView.setOnClickListener(v -> showSaveDirDialog());
+                    break;
+                case ITEM_CLEAR_CACHE:
+                    t1.setText("Clear downloads & cache");
+                    long bytes = CacheCleaner.getCacheSize(h.itemView.getContext());
+                    t2.setText("Free " + FormatUtils.humanBytes(bytes)
+                            + " — settings will be kept");
+                    h.itemView.setOnClickListener(v -> showClearCacheDialog());
                     break;
             }
         }

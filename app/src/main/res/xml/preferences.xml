@@ -14,8 +14,12 @@
         <Preference
             android:key="pref_save_dir"
             android:title="@string/pref_save_dir_title"
-            android:selectable="false"
             android:icon="@drawable/rounded_download_24" />
+        <Preference
+            android:key="pref_clear_cache"
+            android:title="@string/pref_clear_cache_title"
+            android:summary="@string/pref_clear_cache_summary"
+            android:icon="@drawable/rounded_delete_24" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="@string/pref_cat_streaming">

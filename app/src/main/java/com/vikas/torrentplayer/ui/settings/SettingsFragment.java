@@ -15,11 +15,23 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
 
+import android.content.Intent;
+import android.net.Uri;
+import android.os.AsyncTask;
+import android.widget.Toast;
+
+import androidx.core.content.FileProvider;
+
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.vikas.torrentplayer.BuildConfig;
 import com.vikas.torrentplayer.R;
 import com.vikas.torrentplayer.torrent.TorrentManager;
+import com.vikas.torrentplayer.utils.CacheCleaner;
+import com.vikas.torrentplayer.utils.FormatUtils;
 import com.vikas.torrentplayer.utils.PrefsManager;
+
+import java.io.File;
+import java.util.concurrent.Executors;
 
 public class SettingsFragment extends PreferenceFragmentCompat
         implements SharedPreferences.OnSharedPreferenceChangeListener {
@@ -47,10 +59,64 @@ public class SettingsFragment extends PreferenceFragmentCompat
 
         Preference saveDir = findPreference("pref_save_dir");
         if (saveDir != null) {
-            java.io.File dir = TorrentManager.get().getSaveDir();
+            File dir = TorrentManager.get().getSaveDir();
             String path = dir != null ? dir.getAbsolutePath() : "—";
             saveDir.setSummary(getString(R.string.pref_save_dir_summary_fmt, path));
+            saveDir.setOnPreferenceClickListener(p -> {
+                openStorageInFiles();
+                return true;
+            });
         }
+
+        Preference clearCache = findPreference("pref_clear_cache");
+        if (clearCache != null) {
+            clearCache.setOnPreferenceClickListener(p -> {
+                showClearCacheDialog();
+                return true;
+            });
+        }
+    }
+
+    /** Tap on the save-folder row — fire ACTION_VIEW so the system Files app
+     *  can browse the directory. Falls back to a toast on devices without a
+     *  matching activity. */
+    private void openStorageInFiles() {
+        File dir = TorrentManager.get().getSaveDir();
+        if (dir == null) return;
+        try {
+            Uri uri = FileProvider.getUriForFile(requireContext(),
+                    BuildConfig.APPLICATION_ID + ".fileprovider", dir);
+            Intent i = new Intent(Intent.ACTION_VIEW);
+            i.setDataAndType(uri, "resource/folder");
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(i, "Open folder"));
+        } catch (Exception e) {
+            Toast.makeText(requireContext(), dir.getAbsolutePath(),
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void showClearCacheDialog() {
+        long bytes = CacheCleaner.getCacheSize(requireContext());
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.pref_clear_cache_title)
+                .setMessage(getString(R.string.clear_cache_dialog_message_fmt,
+                        FormatUtils.humanBytes(bytes)))
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .setPositiveButton(R.string.action_remove, (d, w) -> runClear())
+                .show();
+    }
+
+    private void runClear() {
+        Executors.newSingleThreadExecutor().execute(() -> {
+            long freed = CacheCleaner.clearAll(requireContext().getApplicationContext());
+            if (!isAdded()) return;
+            requireActivity().runOnUiThread(() ->
+                    Toast.makeText(requireContext(),
+                            getString(R.string.clear_cache_done_fmt,
+                                    FormatUtils.humanBytes(freed)),
+                            Toast.LENGTH_LONG).show());
+        });
     }
 
     @Override

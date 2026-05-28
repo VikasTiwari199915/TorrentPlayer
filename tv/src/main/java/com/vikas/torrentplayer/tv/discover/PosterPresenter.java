@@ -73,8 +73,17 @@ public class PosterPresenter extends Presenter {
         if (rating != null) content.append(" · ").append(rating).append("★");
         card.setContentText(content.toString());
 
+        // Cap the decoded bitmap to roughly the displayed size — TMDB returns
+        // 500×750 by default, decoding that ~80 times on a memory-constrained
+        // TV box is what's most likely to cause the 3–4s post-load stall.
+        // 320×480 keeps it crisp at our card size and a quarter of the RAM.
+        float density = card.getResources().getDisplayMetrics().density;
+        int targetW = (int) (160 * density);
+        int targetH = (int) (240 * density);
         Glide.with(card.getContext())
                 .load(d.effectivePoster())
+                .override(targetW, targetH)
+                .centerCrop()
                 .placeholder(defaultPoster)
                 .error(defaultPoster)
                 .into(card.getMainImageView());

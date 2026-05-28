@@ -52,9 +52,15 @@ public class DiscoverBrowseFragment extends BrowseSupportFragment {
     @Override
     public void onActivityCreated(@Nullable Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
-        setupUiHeader();
-        setupRows();
-        loadDiscover();
+        // Wrap leanback setup so a layout/theme glitch on a specific TV box
+        // surfaces as a logcat line we can read remotely instead of an opaque
+        // hang.
+        try { setupUiHeader(); }
+        catch (Throwable t) { Log.e(TAG, "setupUiHeader failed", t); }
+        try { setupRows(); }
+        catch (Throwable t) { Log.e(TAG, "setupRows failed", t); }
+        try { loadDiscover(); }
+        catch (Throwable t) { Log.e(TAG, "loadDiscover failed", t); }
     }
 
     private void setupUiHeader() {
@@ -116,7 +122,7 @@ public class DiscoverBrowseFragment extends BrowseSupportFragment {
         // "Top on streaming" — default to Netflix movies. Could expose a chip
         // selector later if needed.
         Call<List<DiscoverItem>> streamingTop = api.getStreamingTop(
-                bearer, "netflix", "US", "movie", key);
+                bearer, "netflix", "IN", "movie", key);
         inflight.add(streamingTop);
         streamingTop.enqueue(new Callback<List<DiscoverItem>>() {
             @Override
