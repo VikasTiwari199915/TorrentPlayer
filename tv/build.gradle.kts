@@ -29,6 +29,20 @@ android {
         buildConfig = true
     }
 
+    // Same release-signing setup as :app — both apps share the keystore so a
+    // single GitHub release can ship both APKs.
+    signingConfigs {
+        create("release") {
+            val ks = rootProject.file("keystore.jks")
+            if (ks.exists()) {
+                storeFile = ks
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+                keyAlias = System.getenv("KEY_ALIAS") ?: ""
+                keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -36,6 +50,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (rootProject.file("keystore.jks").exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {

@@ -16,14 +16,16 @@ gson = "2.14.0"
 glide = "5.0.7"
 media3 = "1.10.1"
 libtorrent4j = "2.1.0-39"
-room = "2.6.1"
+room = "2.8.4"
 viewpager2 = "1.1.0"
 torrentstream = "2.7.0"
-leanback = "1.0.0"
-leanback-preference = "1.0.0"
-tvprovider = "1.0.0"
+leanback = "1.2.0"
+leanback-preference = "1.2.0"
+tvprovider = "1.1.0"
+lombok = "1.18.46"
 
 [libraries]
+lombok = { group = "org.projectlombok", name = "lombok", version.ref = "lombok" }
 appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activityKtx" }

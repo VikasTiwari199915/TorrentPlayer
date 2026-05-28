@@ -28,6 +28,22 @@ android {
         buildConfig = true
     }
 
+    // Signing config picks up the keystore that the GitHub Actions workflow
+    // decodes to <rootDir>/keystore.jks before running ./gradlew. Locally —
+    // where keystore.jks doesn't exist — the create() block silently no-ops
+    // and you can keep doing debug builds without touching this.
+    signingConfigs {
+        create("release") {
+            val ks = rootProject.file("keystore.jks")
+            if (ks.exists()) {
+                storeFile = ks
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+                keyAlias = System.getenv("KEY_ALIAS") ?: ""
+                keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -35,6 +51,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Apply signing only when the keystore actually arrived — otherwise
+            // assembleRelease would fail on every local build without a key.
+            if (rootProject.file("keystore.jks").exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {

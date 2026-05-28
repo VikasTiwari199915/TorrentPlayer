@@ -31,4 +31,11 @@
 
     <string name="settings_api_key">TorrentClaw API key</string>
     <string name="settings_storage">Storage</string>
+
+    <string name="update_dialog_title">Update available</string>
+    <string name="update_dialog_message">A new version (%1$s) is available. You\'re on %2$s.\n\nDownload and install?</string>
+    <string name="update_dialog_install">Install</string>
+    <string name="update_dialog_later">Later</string>
+    <string name="update_downloading">Downloading update… %1$d%%</string>
+    <string name="update_download_failed">Update download failed: %1$s</string>
 </resources>

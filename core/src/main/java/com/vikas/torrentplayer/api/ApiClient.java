@@ -10,28 +10,46 @@ import retrofit2.Retrofit;
 import retrofit2.converter.gson.GsonConverterFactory;
 
 /**
- * Singleton Retrofit client for the TorrentClaw API.
+ * Retrofit factory + cached singletons for the APIs the engine talks to.
+ *
+ * <ul>
+ *   <li>{@link #get()} → TorrentClaw API (torrents catalogue + download).</li>
+ *   <li>{@link #github()} → GitHub REST API (used by the auto-updater).</li>
+ * </ul>
  */
 public final class ApiClient {
 
     public static final String BASE_URL = "https://torrentclaw.com/";
+    public static final String GITHUB_BASE_URL = "https://api.github.com/";
 
-    private static volatile TorrentClawApi instance;
+    private static volatile TorrentClawApi torrentClaw;
+    private static volatile GitHubApiService github;
 
     private ApiClient() {}
 
     public static TorrentClawApi get() {
-        if (instance == null) {
+        if (torrentClaw == null) {
             synchronized (ApiClient.class) {
-                if (instance == null) {
-                    instance = build();
+                if (torrentClaw == null) {
+                    torrentClaw = buildRetrofit(BASE_URL).create(TorrentClawApi.class);
                 }
             }
         }
-        return instance;
+        return torrentClaw;
     }
 
-    private static TorrentClawApi build() {
+    public static GitHubApiService github() {
+        if (github == null) {
+            synchronized (ApiClient.class) {
+                if (github == null) {
+                    github = buildRetrofit(GITHUB_BASE_URL).create(GitHubApiService.class);
+                }
+            }
+        }
+        return github;
+    }
+
+    private static Retrofit buildRetrofit(String baseUrl) {
         HttpLoggingInterceptor logging = new HttpLoggingInterceptor();
         logging.setLevel(BuildConfig.DEBUG
                 ? HttpLoggingInterceptor.Level.BASIC
@@ -44,16 +62,14 @@ public final class ApiClient {
                 .writeTimeout(30, TimeUnit.SECONDS)
                 .build();
 
-        Retrofit retrofit = new Retrofit.Builder()
-                .baseUrl(BASE_URL)
+        return new Retrofit.Builder()
+                .baseUrl(baseUrl)
                 .client(client)
                 .addConverterFactory(GsonConverterFactory.create())
                 .build();
-
-        return retrofit.create(TorrentClawApi.class);
     }
 
-    /** Helper to build a "Bearer <token>" header value. */
+    /** Helper to build a "Bearer &lt;token&gt;" header value. */
     public static String bearer(String apiKey) {
         if (apiKey == null || apiKey.isEmpty()) return null;
         return "Bearer " + apiKey;

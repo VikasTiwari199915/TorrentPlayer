@@ -5,6 +5,7 @@ import android.app.Application;
 import com.google.android.material.color.DynamicColors;
 import com.vikas.torrentplayer.service.TorrentDownloadService;
 import com.vikas.torrentplayer.torrent.TorrentManager;
+import com.vikas.torrentplayer.utils.AppAutoUpdater;
 
 /**
  * Phone application entry point. Initialises the torrent engine synchronously
@@ -31,5 +32,10 @@ public class TorrentPlayerApp extends Application {
                 getString(R.string.notif_idle_text)
         ));
         TorrentDownloadService.start(this);
+
+        // Auto-updater: configure the GitHub repo to poll. `assetNameContains`
+        // narrows asset matching for repos that ship both phone & TV APKs in
+        // the same release ("app" picks up app-debug.apk / app-release.apk).
+        AppAutoUpdater.configure("VikasTiwari199915", "TorrentPlayer", "app");
     }
 }

@@ -7,4 +7,6 @@
          explicit root here, otherwise getUriForFile() throws
          "Failed to find configured root that contains …". -->
     <external-media-path name="media" path="." />
+    <!-- Auto-updater stages the freshly-downloaded APK in the external cache. -->
+    <external-cache-path name="cache" path="." />
 </paths>

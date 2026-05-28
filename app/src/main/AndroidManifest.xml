@@ -11,6 +11,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Auto-updater: required for the system installer flow on Android 8+. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!-- Android 11+ package visibility: we explicitly want to be able to fire
+         an ACTION_VIEW for the APK MIME type. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
+    </queries>
+
     <application
         android:name=".TorrentPlayerApp"
         android:allowBackup="true"

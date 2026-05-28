@@ -61,4 +61,7 @@ dependencies {
     implementation(libs.libtorrent4j.arm32)
     implementation(libs.libtorrent4j.x86)
     implementation(libs.libtorrent4j.x8664)
+
+    compileOnly(libs.lombok)
+    annotationProcessor(libs.lombok)
 }

@@ -4,6 +4,7 @@ import android.app.Application;
 
 import com.vikas.torrentplayer.service.TorrentDownloadService;
 import com.vikas.torrentplayer.torrent.TorrentManager;
+import com.vikas.torrentplayer.utils.AppAutoUpdater;
 
 public class TorrentPlayerTvApp extends Application {
 
@@ -22,5 +23,9 @@ public class TorrentPlayerTvApp extends Application {
                 getString(R.string.notif_idle_text)
         ));
         TorrentDownloadService.start(this);
+
+        // Auto-updater: TV-specific asset name match keeps phone and TV builds
+        // distinguishable in the same GitHub release.
+        AppAutoUpdater.configure("VikasTiwari199915", "TorrentPlayer", "tv");
     }
 }

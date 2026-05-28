@@ -12,7 +12,5 @@ core/build
 .externalNativeBuild
 .cxx
 local.properties
-/tv/release/output-metadata.json
-/tv/release/torrent-player-tv-release.apk
-/tv/release/baselineProfiles/0/tv-release.dm
-/tv/release/baselineProfiles/1/tv-release.dm
+/tv/release/
+/app/release/
