@@ -122,7 +122,7 @@ public class DiscoverBrowseFragment extends BrowseSupportFragment {
         // "Top on streaming" — default to Netflix movies. Could expose a chip
         // selector later if needed.
         Call<List<DiscoverItem>> streamingTop = api.getStreamingTop(
-                bearer, "netflix", "IN", "movie", key);
+                bearer, "netflix", "US", "movie", key);
         inflight.add(streamingTop);
         streamingTop.enqueue(new Callback<List<DiscoverItem>>() {
             @Override

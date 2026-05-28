@@ -14,3 +14,4 @@ core/build
 local.properties
 /tv/release/
 /app/release/
+build/
