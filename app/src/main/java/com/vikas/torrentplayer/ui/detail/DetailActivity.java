@@ -91,14 +91,16 @@ public class DetailActivity extends AppCompatActivity {
         adapter = new TorrentAdapter(new TorrentAdapter.OnTorrentAction() {
             @Override
             public void onPlay(TorrentItem item) {
-                DownloadHandle h = TorrentManager.get().startStream(vm.result(), item);
-                PlayerActivity.start(DetailActivity.this, h.infoHash);
+                DownloadHandle h = safeStartStream(item);
+                if (h != null) PlayerActivity.start(DetailActivity.this, h.infoHash);
             }
             @Override
             public void onDownload(TorrentItem item) {
-                TorrentManager.get().startStream(vm.result(), item);
-                Toast.makeText(DetailActivity.this,
-                        "Download started", Toast.LENGTH_SHORT).show();
+                DownloadHandle h = safeStartStream(item);
+                if (h != null) {
+                    Toast.makeText(DetailActivity.this,
+                            "Download started", Toast.LENGTH_SHORT).show();
+                }
             }
             @Override
             public void onMagnet(TorrentItem item) {
@@ -124,6 +126,27 @@ public class DetailActivity extends AppCompatActivity {
         // The AppBarLayout already declares fitsSystemWindows="true", so insets
         // are applied automatically. Adding a manual listener here would
         // double-pad the toolbar.
+    }
+
+    /**
+     * Wraps {@link TorrentManager#startStream} with a defensive init() (in
+     * case the engine hasn't initialised yet) and a try/catch that surfaces
+     * any failure as a Toast instead of crashing the activity.
+     */
+    @Nullable
+    private DownloadHandle safeStartStream(TorrentItem item) {
+        try {
+            TorrentManager.get().init(getApplicationContext());
+            return TorrentManager.get().startStream(vm.result(), item);
+        } catch (Throwable ex) {
+            android.util.Log.e("DetailActivity", "startStream failed", ex);
+            Toast.makeText(DetailActivity.this,
+                    "Could not start: "
+                            + (ex.getMessage() != null ? ex.getMessage()
+                                                       : ex.getClass().getSimpleName()),
+                    Toast.LENGTH_LONG).show();
+            return null;
+        }
     }
 
     private void bindHeader(SearchResult r) {

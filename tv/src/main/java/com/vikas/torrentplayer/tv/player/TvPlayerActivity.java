@@ -60,11 +60,27 @@ public class TvPlayerActivity extends FragmentActivity {
         loadingProgress = findViewById(R.id.loading_progress);
 
         String hash = getIntent().getStringExtra(EXTRA_HASH);
+        try {
+            TorrentManager.get().init(getApplicationContext());
+        } catch (Throwable ignored) { /* idempotent */ }
         handle = TorrentManager.get().findByHash(hash);
-        if (handle == null) { finish(); return; }
+        if (handle == null) {
+            android.widget.Toast.makeText(this,
+                    "Download not found", android.widget.Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
 
-        setupPlayer();
-        observeHandle();
+        try {
+            setupPlayer();
+            observeHandle();
+        } catch (Throwable ex) {
+            android.util.Log.e("TvPlayer", "setup failed", ex);
+            android.widget.Toast.makeText(this,
+                    "Player error: " + (ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName()),
+                    android.widget.Toast.LENGTH_LONG).show();
+            finish();
+        }
     }
 
     private void setupPlayer() {

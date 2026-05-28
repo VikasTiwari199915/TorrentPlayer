@@ -182,8 +182,28 @@ public class TvDetailsActivity extends FragmentActivity {
             h.seeders.setText("S: " + t.seeders);
             h.title.setText(t.rawTitle != null ? t.rawTitle : "—");
             h.itemView.setOnClickListener(v -> {
-                DownloadHandle hd = TorrentManager.get().startStream(result, t);
-                TvPlayerActivity.start(TvDetailsActivity.this, hd.infoHash);
+                // The engine usually finishes init before any UI surfaces, but
+                // on a fresh launch the foreground service can still be coming
+                // up when the user makes a fast click. Re-running init() is
+                // idempotent so it's safe as a guard.
+                try {
+                    TorrentManager.get().init(getApplicationContext());
+                    DownloadHandle hd = TorrentManager.get().startStream(result, t);
+                    if (hd == null) {
+                        android.widget.Toast.makeText(TvDetailsActivity.this,
+                                "Could not start torrent (no handle)",
+                                android.widget.Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    TvPlayerActivity.start(TvDetailsActivity.this, hd.infoHash);
+                } catch (Throwable ex) {
+                    android.util.Log.e("TvDetails", "startStream failed", ex);
+                    android.widget.Toast.makeText(TvDetailsActivity.this,
+                            "Could not start: "
+                                    + (ex.getMessage() != null ? ex.getMessage()
+                                                                : ex.getClass().getSimpleName()),
+                            android.widget.Toast.LENGTH_LONG).show();
+                }
             });
         }
 

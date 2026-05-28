@@ -1,7 +1,9 @@
 package com.vikas.torrentplayer.tv.discover;
 
 import android.graphics.drawable.Drawable;
+import android.view.View;
 import android.view.ViewGroup;
+import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
@@ -13,30 +15,21 @@ import com.vikas.torrentplayer.api.models.DiscoverItem;
 import com.vikas.torrentplayer.tv.R;
 
 /**
- * Renders a {@link DiscoverItem} as a 200×300 poster card. Leanback's
- * {@link ImageCardView} handles focus highlighting, title/content lines, and
- * loading shimmer for free.
+ * Standard TV poster card. 160×240 dp lets a full row of 6 fit on a 1080p
+ * screen with margins; the title TextView inside ImageCardView is forced to a
+ * single line so long titles ellipsize instead of pushing card content
+ * outside the row bounds.
  */
 public class PosterPresenter extends Presenter {
 
-    private static final int CARD_WIDTH_DP = 200;
-    private static final int CARD_HEIGHT_DP = 300;
+    private static final int CARD_WIDTH_DP = 160;
+    private static final int CARD_HEIGHT_DP = 240;
 
     private Drawable defaultPoster;
 
     @Override
     public ViewHolder onCreateViewHolder(ViewGroup parent) {
-        ImageCardView card = new ImageCardView(parent.getContext()) {
-            @Override
-            public void setSelected(boolean selected) {
-                super.setSelected(selected);
-                int color = ContextCompat.getColor(
-                        getContext(),
-                        selected ? android.R.color.holo_purple : android.R.color.darker_gray);
-                setBackgroundColor(color);
-                findViewById(androidx.leanback.R.id.info_field).setBackgroundColor(color);
-            }
-        };
+        ImageCardView card = new ImageCardView(parent.getContext());
         card.setFocusable(true);
         card.setFocusableInTouchMode(true);
 
@@ -47,6 +40,24 @@ public class PosterPresenter extends Presenter {
         defaultPoster = ContextCompat.getDrawable(parent.getContext(),
                 R.drawable.tv_placeholder_poster);
         card.setMainImage(defaultPoster);
+
+        // Force single-line ellipsize on the built-in title TextView — by
+        // default it would expand and shove the content/subtitle outside the
+        // card boundary for long titles.
+        View titleView = card.findViewById(androidx.leanback.R.id.title_text);
+        if (titleView instanceof TextView) {
+            TextView t = (TextView) titleView;
+            t.setMaxLines(1);
+            t.setSingleLine(true);
+            t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        }
+        View contentView = card.findViewById(androidx.leanback.R.id.content_text);
+        if (contentView instanceof TextView) {
+            TextView c = (TextView) contentView;
+            c.setMaxLines(1);
+            c.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        }
+
         return new ViewHolder(card);
     }
 

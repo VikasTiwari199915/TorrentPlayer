@@ -4,7 +4,6 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.util.Log;
-import android.view.View;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -36,18 +35,15 @@ import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Response;
 
-/**
- * Leanback home screen — rows of posters per discover endpoint, plus a final
- * "library" row with Search / Downloads / Settings action cards.
- */
 public class DiscoverBrowseFragment extends BrowseSupportFragment {
 
     private static final String TAG = "TvBrowse";
 
     private static final int ROW_TRENDING = 0;
     private static final int ROW_POPULAR = 1;
-    private static final int ROW_RECENT = 2;
-    private static final int ROW_LIBRARY = 3;
+    private static final int ROW_STREAMING_TOP = 2;
+    private static final int ROW_RECENT = 3;
+    private static final int ROW_LIBRARY = 4;
 
     private ArrayObjectAdapter rowsAdapter;
     private final TorrentClawApi api = ApiClient.get();
@@ -76,6 +72,7 @@ public class DiscoverBrowseFragment extends BrowseSupportFragment {
 
         rowsAdapter.add(emptyRow(ROW_TRENDING, getString(R.string.row_trending)));
         rowsAdapter.add(emptyRow(ROW_POPULAR, getString(R.string.row_popular)));
+        rowsAdapter.add(emptyRow(ROW_STREAMING_TOP, getString(R.string.row_streaming_top)));
         rowsAdapter.add(emptyRow(ROW_RECENT, getString(R.string.row_recent)));
         rowsAdapter.add(buildLibraryRow());
 
@@ -90,9 +87,12 @@ public class DiscoverBrowseFragment extends BrowseSupportFragment {
 
     private ListRow buildLibraryRow() {
         ArrayObjectAdapter adapter = new ArrayObjectAdapter(new ActionPresenter());
-        adapter.add(new ActionCard(ActionCard.SEARCH, getString(R.string.action_search)));
-        adapter.add(new ActionCard(ActionCard.DOWNLOADS, getString(R.string.action_downloads)));
-        adapter.add(new ActionCard(ActionCard.SETTINGS, getString(R.string.action_settings)));
+        adapter.add(new ActionCard(ActionCard.SEARCH,
+                getString(R.string.action_search), R.drawable.rounded_search_24));
+        adapter.add(new ActionCard(ActionCard.DOWNLOADS,
+                getString(R.string.action_downloads), R.drawable.rounded_download_24));
+        adapter.add(new ActionCard(ActionCard.SETTINGS,
+                getString(R.string.action_settings), R.drawable.rounded_settings_24));
         return new ListRow(ROW_LIBRARY,
                 new HeaderItem(ROW_LIBRARY, getString(R.string.row_quick_actions)),
                 adapter);
@@ -100,7 +100,6 @@ public class DiscoverBrowseFragment extends BrowseSupportFragment {
 
     private void loadDiscover() {
         if (!new PrefsManager(requireContext()).hasApiKey()) {
-            // No key — leave rows empty, user can go to Settings via library
             return;
         }
         String key = new PrefsManager(requireContext()).getApiKey();
@@ -113,6 +112,25 @@ public class DiscoverBrowseFragment extends BrowseSupportFragment {
         Call<DiscoverListResponse> popular = api.getPopular(bearer, 20, 1, key);
         inflight.add(popular);
         popular.enqueue(rowFiller(ROW_POPULAR));
+
+        // "Top on streaming" — default to Netflix movies. Could expose a chip
+        // selector later if needed.
+        Call<List<DiscoverItem>> streamingTop = api.getStreamingTop(
+                bearer, "netflix", "US", "movie", key);
+        inflight.add(streamingTop);
+        streamingTop.enqueue(new Callback<List<DiscoverItem>>() {
+            @Override
+            public void onResponse(@NonNull Call<List<DiscoverItem>> call,
+                                   @NonNull Response<List<DiscoverItem>> response) {
+                if (!isAdded() || rowsAdapter == null) return;
+                if (!response.isSuccessful() || response.body() == null) return;
+                fillRow(ROW_STREAMING_TOP, response.body());
+            }
+            @Override
+            public void onFailure(@NonNull Call<List<DiscoverItem>> call, @NonNull Throwable t) {
+                Log.w(TAG, "streaming-top failed", t);
+            }
+        });
 
         Call<DiscoverListResponse> recent = api.getRecent(bearer, 20, 1, key);
         inflight.add(recent);
@@ -128,7 +146,6 @@ public class DiscoverBrowseFragment extends BrowseSupportFragment {
                 if (!response.isSuccessful() || response.body() == null) return;
                 fillRow(rowId, response.body().items);
             }
-
             @Override
             public void onFailure(@NonNull Call<DiscoverListResponse> call, @NonNull Throwable t) {
                 Log.w(TAG, "row " + rowId + " failed", t);
