@@ -8,6 +8,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -56,11 +57,13 @@ public class TvDetailsActivity extends FragmentActivity {
     private ImageView poster, backdrop;
     private View scrim;
     private TextView title, meta, overview, empty;
+    private android.widget.Button filterSe;
     private RecyclerView torrentsList;
 
     private DiscoverItem item;
     private SearchResult result;
     private boolean backdropEnabled;
+    private Integer filterSeason, filterEpisode;
 
     private final TorrentClawApi api = ApiClient.get();
 
@@ -76,6 +79,7 @@ public class TvDetailsActivity extends FragmentActivity {
         meta = findViewById(R.id.meta);
         overview = findViewById(R.id.overview);
         empty = findViewById(R.id.empty);
+        filterSe = findViewById(R.id.filter_se);
         torrentsList = findViewById(R.id.torrents);
         torrentsList.setLayoutManager(new LinearLayoutManager(this));
 
@@ -83,8 +87,79 @@ public class TvDetailsActivity extends FragmentActivity {
 
         item = (DiscoverItem) getIntent().getSerializableExtra(EXTRA_ITEM);
         if (item == null) { finish(); return; }
+        // Season/episode filter only makes sense for shows.
+        if (item.isShow()) {
+            filterSe.setVisibility(View.VISIBLE);
+            filterSe.setOnClickListener(v -> showSeasonEpisodeDialog());
+            updateFilterLabel();
+        }
         bindHeader(item);
         searchByTitle(item);
+    }
+
+    private void updateFilterLabel() {
+        String label;
+        if (filterSeason != null && filterEpisode != null) {
+            label = String.format(java.util.Locale.US, "S%02dE%02d", filterSeason, filterEpisode);
+        } else if (filterSeason != null) {
+            label = "Season " + filterSeason;
+        } else {
+            label = "All episodes";
+        }
+        filterSe.setText("Filter: " + label);
+    }
+
+    /** D-pad dialog with season + episode inputs (episode requires a season). */
+    private void showSeasonEpisodeDialog() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (24 * getResources().getDisplayMetrics().density);
+        box.setPadding(pad, pad / 2, pad, 0);
+
+        final android.widget.EditText season = new android.widget.EditText(this);
+        season.setHint("Season (e.g. 1)");
+        season.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        season.setSingleLine();
+        if (filterSeason != null) season.setText(String.valueOf(filterSeason));
+        box.addView(season);
+
+        final android.widget.EditText episode = new android.widget.EditText(this);
+        episode.setHint("Episode (optional)");
+        episode.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        episode.setSingleLine();
+        if (filterEpisode != null) episode.setText(String.valueOf(filterEpisode));
+        box.addView(episode);
+
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Filter by season / episode")
+                .setView(box)
+                .setNeutralButton("Clear", (d, w) -> {
+                    filterSeason = null; filterEpisode = null;
+                    updateFilterLabel();
+                    searchByTitle(item);
+                })
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Apply", (d, w) -> {
+                    Integer s = parseOrNull(season.getText().toString());
+                    Integer e = parseOrNull(episode.getText().toString());
+                    if (e != null && s == null) {
+                        android.widget.Toast.makeText(this,
+                                "Pick a season for that episode", android.widget.Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    filterSeason = s; filterEpisode = e;
+                    updateFilterLabel();
+                    searchByTitle(item);
+                })
+                .show();
+    }
+
+    private static Integer parseOrNull(String s) {
+        if (s == null) return null;
+        s = s.trim();
+        if (s.isEmpty()) return null;
+        try { int v = Integer.parseInt(s); return v > 0 ? v : null; }
+        catch (NumberFormatException e) { return null; }
     }
 
     private void bindHeader(DiscoverItem d) {
@@ -132,13 +207,17 @@ public class TvDetailsActivity extends FragmentActivity {
             return;
         }
         String key = prefs.getApiKey();
+        // Show a loading state and clear stale results when re-querying.
+        empty.setText("Loading…");
+        empty.setVisibility(View.VISIBLE);
+        torrentsList.setVisibility(View.GONE);
         api.search(
                 ApiClient.bearer(key),
                 d.title,
                 /* type */ null,
                 "available", "seeders",
                 1, 25, false,
-                /* genre */ null, /* season */ null, /* episode */ null,
+                /* genre */ null, filterSeason, filterEpisode,
                 key
         ).enqueue(new Callback<SearchResponse>() {
             @Override
@@ -168,6 +247,8 @@ public class TvDetailsActivity extends FragmentActivity {
                         return Integer.compare(b.seeders, a.seeders);
                     }
                 });
+                empty.setVisibility(View.GONE);
+                torrentsList.setVisibility(View.VISIBLE);
                 torrentsList.setAdapter(new TorrentAdapter(items));
             }
 
