@@ -1375,15 +1375,23 @@ public class TorrentManager {
         final long rawSpeed = status.downloadRate();
         final int seeders = status.numSeeds();
         final int bufferPct = computeHeadBuffer(rec, th);
+        // Playback can begin once the HEAD is on disk — the tail (MP4 moov / MKV
+        // cues) is fetched on demand because TorrentDataSource blocks reads on
+        // missing pieces and we deadline-prioritise the tail. Gating on the full
+        // head+tail buffer meant streaming never started until the whole file
+        // finished, since sequential download fetches the tail last.
+        final boolean headReady = isHeadReady(rec, th);
         final boolean fileReady = rec.videoFilePath != null
                 && rec.videoFilePath.exists() && rec.videoFilePath.length() > 0;
 
-        main.post(() -> applyProgress(key, rec, pct, rawSpeed, seeders, bufferPct, fileReady));
+        main.post(() -> applyProgress(key, rec, pct, rawSpeed, seeders, bufferPct,
+                headReady, fileReady));
     }
 
     @MainThread
     private void applyProgress(String key, TorrentRecord rec, int pct, long rawSpeed,
-                               int seeders, int bufferPct, boolean fileReady) {
+                               int seeders, int bufferPct, boolean headReady,
+                               boolean fileReady) {
         DownloadHandle h = handles.get(key);
         if (h == null) return;
 
@@ -1397,12 +1405,12 @@ public class TorrentManager {
 
         h.progress.setValue(new DownloadHandle.Progress(pct, speed, seeders, bufferPct));
 
-        if (!rec.readyEmitted && rec.videoFilePath != null && bufferPct >= 100 && fileReady) {
+        if (!rec.readyEmitted && rec.videoFilePath != null && headReady && fileReady) {
             rec.readyEmitted = true;
             h.videoFile.setValue(rec.videoFilePath);
             h.state.setValue(DownloadHandle.State.READY);
             persistAsync(h);
-            Log.i(TAG, "READY: " + rec.videoFilePath.getAbsolutePath());
+            Log.i(TAG, "READY (head buffered): " + rec.videoFilePath.getAbsolutePath());
         }
 
         // Periodic progress persistence — throttle to whole-percent changes to
@@ -1431,6 +1439,17 @@ public class TorrentManager {
 
     /** Throttles progress writes. */
     private final HashMap<String, Integer> lastPersistedProgress = new HashMap<>();
+
+    /** True once every piece of the head buffer (start of the video file) is on
+     *  disk — enough to begin playback; the tail is streamed on demand. */
+    private boolean isHeadReady(TorrentRecord rec, TorrentHandle th) {
+        if (rec.videoFirstPiece < 0) return false;
+        int headEnd = Math.min(rec.headBufferLastPiece, rec.videoLastPiece);
+        for (int i = rec.videoFirstPiece; i <= headEnd; i++) {
+            if (!th.havePiece(i)) return false;
+        }
+        return true;
+    }
 
     private int computeHeadBuffer(TorrentRecord rec, TorrentHandle th) {
         if (rec.videoFirstPiece < 0) return 0;
