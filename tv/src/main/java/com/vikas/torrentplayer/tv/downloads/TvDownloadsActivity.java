@@ -1,6 +1,8 @@
 package com.vikas.torrentplayer.tv.downloads;
 
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -32,12 +34,26 @@ public class TvDownloadsActivity extends FragmentActivity {
 
     private DownloadsAdapter adapter;
     private TextView empty;
+    private RecyclerView list;
+
+    /** Live progress refresh. The list LiveData only fires on structural changes
+     *  (add/remove); per-download progress lives in each handle's own LiveData,
+     *  updated by the engine's 2s poller. We tick here and update just the
+     *  dynamic views of visible rows — no notifyDataSetChanged, so D-pad focus
+     *  is never disturbed. */
+    private final Handler ui = new Handler(Looper.getMainLooper());
+    private final Runnable liveTick = new Runnable() {
+        @Override public void run() {
+            adapter.refreshVisibleRows();
+            ui.postDelayed(this, 1500L);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_tv_downloads);
-        RecyclerView list = findViewById(R.id.list);
+        list = findViewById(R.id.list);
         empty = findViewById(R.id.empty);
 
         adapter = new DownloadsAdapter();
@@ -49,6 +65,18 @@ public class TvDownloadsActivity extends FragmentActivity {
             adapter.submit(safe);
             empty.setVisibility(safe.isEmpty() ? View.VISIBLE : View.GONE);
         });
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        ui.post(liveTick);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        ui.removeCallbacks(liveTick);
     }
 
     private class DownloadsAdapter extends RecyclerView.Adapter<DownloadsAdapter.VH> {
@@ -66,11 +94,20 @@ public class TvDownloadsActivity extends FragmentActivity {
                     .inflate(R.layout.item_tv_download, parent, false));
         }
 
-        @Override
-        public void onBindViewHolder(@NonNull VH h, int position) {
-            DownloadHandle handle = items.get(position);
-            h.title.setText(handle.title);
+        /** Re-renders the live (status/percent/speed/progress) parts of every
+         *  currently-visible row without rebinding, preserving focus. */
+        void refreshVisibleRows() {
+            if (list == null) return;
+            for (int i = 0; i < list.getChildCount(); i++) {
+                View child = list.getChildAt(i);
+                int pos = list.getChildAdapterPosition(child);
+                if (pos == RecyclerView.NO_POSITION || pos >= items.size()) continue;
+                RecyclerView.ViewHolder vh = list.getChildViewHolder(child);
+                if (vh instanceof VH) bindDynamic((VH) vh, items.get(pos));
+            }
+        }
 
+        private void bindDynamic(VH h, DownloadHandle handle) {
             DownloadHandle.Progress p = handle.progress.getValue();
             DownloadHandle.State s = handle.state.getValue();
             int pct = p == null ? 0 : p.percent;
@@ -78,6 +115,13 @@ public class TvDownloadsActivity extends FragmentActivity {
             String speed = p == null ? "" : FormatUtils.humanSpeed(p.downloadSpeed);
             h.meta.setText(state + " · " + pct + "%" + (speed.isEmpty() ? "" : " · " + speed));
             h.progress.setProgress(pct);
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull VH h, int position) {
+            DownloadHandle handle = items.get(position);
+            h.title.setText(handle.title);
+            bindDynamic(h, handle);
 
             // Single OK click opens the action menu — gives the user explicit
             // Play / Pause / Resume / Details / Remove choices instead of

@@ -651,12 +651,9 @@ public class TorrentManager {
         DownloadHandle h = handles.get(infoHash);
         TorrentRecord rec = records.get(infoHash);
         if (h == null || rec == null || rec.hash == null) return;
-        TorrentHandle th = session.find(rec.hash);
-        if (th != null && th.isValid()) {
-            try { th.unsetFlags(TorrentFlags.AUTO_MANAGED); }
-            catch (Throwable t) { Log.w(TAG, "unsetFlags failed", t); }
-            th.pause();
-        }
+        // UI/state first (instant feedback), libtorrent JNI off the main thread —
+        // these calls can block for seconds on weak boxes while the session is
+        // busy checking pieces, which froze the app on resume.
         if (h.state.getValue() != DownloadHandle.State.FINISHED) {
             h.state.setValue(DownloadHandle.State.PAUSED);
             // Force-zero the progress so the UI doesn't show stale speed
@@ -665,6 +662,15 @@ public class TorrentManager {
             h.progress.setValue(new DownloadHandle.Progress(pct, 0, 0, p == null ? 0 : p.bufferProgress));
             persistAsync(h);
         }
+        final Sha1Hash hash = rec.hash;
+        io.execute(() -> {
+            TorrentHandle th = session.find(hash);
+            if (th != null && th.isValid()) {
+                try { th.unsetFlags(TorrentFlags.AUTO_MANAGED); }
+                catch (Throwable t) { Log.w(TAG, "unsetFlags failed", t); }
+                th.pause();
+            }
+        });
     }
 
     /** Resume a paused download. */
@@ -673,30 +679,39 @@ public class TorrentManager {
         DownloadHandle h = handles.get(infoHash);
         TorrentRecord rec = records.get(infoHash);
         if (h == null || rec == null || rec.hash == null) return;
-        TorrentHandle th = session.find(rec.hash);
-        if (th != null && th.isValid()) {
-            try { th.setFlags(TorrentFlags.AUTO_MANAGED); }
-            catch (Throwable t) { Log.w(TAG, "setFlags failed", t); }
-            th.resume();
-        }
         if (h.state.getValue() == DownloadHandle.State.PAUSED) {
             h.state.setValue(DownloadHandle.State.BUFFERING);
             persistAsync(h);
         }
+        // libtorrent JNI off the main thread: resume() kicks off a piece recheck
+        // (fast-resume is disabled), and the call can block under lock
+        // contention on a weak box — this was the "freeze on resume" ANR.
+        final Sha1Hash hash = rec.hash;
+        io.execute(() -> {
+            TorrentHandle th = session.find(hash);
+            if (th != null && th.isValid()) {
+                try { th.setFlags(TorrentFlags.AUTO_MANAGED); }
+                catch (Throwable t) { Log.w(TAG, "setFlags failed", t); }
+                th.resume();
+            }
+        });
     }
 
     /** Called when a torrent reaches 100% — stop seeding so the speed UI goes
      *  to zero and CPU/network isn't burnt on a finished item. */
     private void stopSeedingFor(TorrentRecord rec) {
         if (rec == null || rec.hash == null || session == null) return;
-        TorrentHandle th = session.find(rec.hash);
-        if (th == null || !th.isValid()) return;
-        try {
-            th.unsetFlags(TorrentFlags.AUTO_MANAGED);
-            th.pause();
-        } catch (Throwable t) {
-            Log.w(TAG, "stopSeeding failed", t);
-        }
+        final Sha1Hash hash = rec.hash;
+        io.execute(() -> {
+            TorrentHandle th = session.find(hash);
+            if (th == null || !th.isValid()) return;
+            try {
+                th.unsetFlags(TorrentFlags.AUTO_MANAGED);
+                th.pause();
+            } catch (Throwable t) {
+                Log.w(TAG, "stopSeeding failed", t);
+            }
+        });
     }
 
     @MainThread
@@ -704,15 +719,18 @@ public class TorrentManager {
         DownloadHandle h = active.getValue();
         if (h == null) return;
         TorrentRecord rec = records.get(h.infoHash);
-        if (rec != null && rec.hash != null) {
-            TorrentHandle th = session.find(rec.hash);
-            if (th != null && th.isValid()) th.pause();
-        }
         if (h.state.getValue() != DownloadHandle.State.FINISHED) {
             h.state.setValue(DownloadHandle.State.PAUSED);
             persistAsync(h);
         }
         active.setValue(null);
+        if (rec != null && rec.hash != null) {
+            final Sha1Hash hash = rec.hash;
+            io.execute(() -> {
+                TorrentHandle th = session.find(hash);
+                if (th != null && th.isValid()) th.pause();
+            });
+        }
     }
 
     @MainThread
@@ -723,26 +741,31 @@ public class TorrentManager {
 
         DownloadHandle a = active.getValue();
         if (a != null && a.infoHash.equals(infoHash)) active.setValue(null);
-
-        if (rec != null && rec.hash != null) {
-            TorrentHandle th = session.find(rec.hash);
-            if (th != null && th.isValid()) {
-                if (deleteFiles) session.remove(th, SessionHandle.DELETE_FILES);
-                else session.remove(th);
-            }
-        }
-        if (deleteFiles) {
-            File cached = new File(torrentFileCacheDir, infoHash + ".torrent");
-            if (cached.exists()) //noinspection ResultOfMethodCallIgnored
-                cached.delete();
-        }
-        // Always nuke the fast-resume blob when removing — otherwise a future
-        // re-add of the same hash would resume from stale piece state.
-        File resume = new File(torrentFileCacheDir, infoHash + ".resume");
-        if (resume.exists()) //noinspection ResultOfMethodCallIgnored
-            resume.delete();
-        io.execute(() -> dao.deleteByHash(infoHash));
         publishList();
+
+        // libtorrent removal + file deletion can be slow (it unlinks every piece
+        // file), so do it off the main thread along with the DB delete.
+        final Sha1Hash hash = rec != null ? rec.hash : null;
+        io.execute(() -> {
+            if (hash != null) {
+                TorrentHandle th = session.find(hash);
+                if (th != null && th.isValid()) {
+                    if (deleteFiles) session.remove(th, SessionHandle.DELETE_FILES);
+                    else session.remove(th);
+                }
+            }
+            if (deleteFiles) {
+                File cached = new File(torrentFileCacheDir, infoHash + ".torrent");
+                if (cached.exists()) //noinspection ResultOfMethodCallIgnored
+                    cached.delete();
+            }
+            // Always nuke the fast-resume blob when removing — otherwise a future
+            // re-add of the same hash would resume from stale piece state.
+            File resume = new File(torrentFileCacheDir, infoHash + ".resume");
+            if (resume.exists()) //noinspection ResultOfMethodCallIgnored
+                resume.delete();
+            dao.deleteByHash(infoHash);
+        });
     }
 
     /**
@@ -1048,7 +1071,10 @@ public class TorrentManager {
                     final TorrentHandle fe = existing;
                     main.post(() -> {
                         bindRecord(handle, ti, files, videoIdx, subtitleIndices);
-                        if (!addPaused) prioritiseTailPieces(fe, records.get(handle.infoHash));
+                        if (!addPaused) {
+                            TorrentRecord r = records.get(handle.infoHash);
+                            io.execute(() -> prioritiseTailPieces(fe, r));
+                        }
                         handle.state.setValue(finalState);
                         persistAsync(handle);
                     });
@@ -1086,7 +1112,10 @@ public class TorrentManager {
                 final boolean hadResume = resumeArg != null;
                 main.post(() -> {
                     bindRecord(handle, ti, files, videoIdx, subtitleIndices);
-                    if (!addPaused) prioritiseTailPieces(fth, records.get(handle.infoHash));
+                    if (!addPaused) {
+                        TorrentRecord r = records.get(handle.infoHash);
+                        io.execute(() -> prioritiseTailPieces(fth, r));
+                    }
                     handle.state.setValue(finalState);
                     persistAsync(handle);
                     Log.i(TAG, "added torrent \"" + ti.name() + "\" videoFile="
@@ -1320,40 +1349,60 @@ public class TorrentManager {
     }
 
     private void refreshAllProgress() {
-        for (Map.Entry<String, TorrentRecord> e : records.entrySet()) {
-            refreshProgressForKey(e.getKey(), e.getValue());
-        }
+        // Snapshot on the main thread, then do the libtorrent reads on the io
+        // thread. The status() call + havePiece() buffer scan are JNI work that,
+        // run on main every 2s, competed with video decode on weak boxes and
+        // made the player stutter/freeze during buffering. We never iterate the
+        // live map off-main (HashMap isn't thread-safe).
+        final List<Map.Entry<String, TorrentRecord>> snapshot =
+                new ArrayList<>(records.entrySet());
+        if (snapshot.isEmpty()) return;
+        io.execute(() -> {
+            for (Map.Entry<String, TorrentRecord> e : snapshot) {
+                refreshProgressForKeyBg(e.getKey(), e.getValue());
+            }
+        });
     }
 
-    private void refreshProgressForKey(String key, TorrentRecord rec) {
-        DownloadHandle h = handles.get(key);
-        if (h == null || rec.hash == null) return;
+    /** libtorrent reads on the io thread; the LiveData mutations are posted to main. */
+    private void refreshProgressForKeyBg(String key, TorrentRecord rec) {
+        if (rec.hash == null || session == null) return;
         TorrentHandle th = session.find(rec.hash);
         if (th == null || !th.isValid()) return;
 
         TorrentStatus status = th.status();
-        int pct = Math.max(0, Math.min(100, Math.round(status.progress() * 100)));
+        final int pct = Math.max(0, Math.min(100, Math.round(status.progress() * 100)));
+        final long rawSpeed = status.downloadRate();
+        final int seeders = status.numSeeds();
+        final int bufferPct = computeHeadBuffer(rec, th);
+        final boolean fileReady = rec.videoFilePath != null
+                && rec.videoFilePath.exists() && rec.videoFilePath.length() > 0;
+
+        main.post(() -> applyProgress(key, rec, pct, rawSpeed, seeders, bufferPct, fileReady));
+    }
+
+    @MainThread
+    private void applyProgress(String key, TorrentRecord rec, int pct, long rawSpeed,
+                               int seeders, int bufferPct, boolean fileReady) {
+        DownloadHandle h = handles.get(key);
+        if (h == null) return;
+
         // Suppress reported speed for paused / finished torrents so the UI
         // doesn't jitter with leftover stats from libtorrent's last sample.
         DownloadHandle.State curState = h.state.getValue();
         boolean stoppedish = curState == DownloadHandle.State.PAUSED
                 || curState == DownloadHandle.State.FINISHED
                 || pct >= 100;
-        long speed = stoppedish ? 0 : status.downloadRate();
-        int seeders = status.numSeeds();
-        int bufferPct = computeHeadBuffer(rec, th);
+        long speed = stoppedish ? 0 : rawSpeed;
 
         h.progress.setValue(new DownloadHandle.Progress(pct, speed, seeders, bufferPct));
 
-        if (!rec.readyEmitted && rec.videoFilePath != null && bufferPct >= 100) {
-            if (rec.videoFilePath.exists() && rec.videoFilePath.length() > 0) {
-                rec.readyEmitted = true;
-                h.videoFile.setValue(rec.videoFilePath);
-                h.state.setValue(DownloadHandle.State.READY);
-                persistAsync(h);
-                Log.i(TAG, "READY: " + rec.videoFilePath.getAbsolutePath()
-                        + " (" + rec.videoFilePath.length() + " bytes on disk)");
-            }
+        if (!rec.readyEmitted && rec.videoFilePath != null && bufferPct >= 100 && fileReady) {
+            rec.readyEmitted = true;
+            h.videoFile.setValue(rec.videoFilePath);
+            h.state.setValue(DownloadHandle.State.READY);
+            persistAsync(h);
+            Log.i(TAG, "READY: " + rec.videoFilePath.getAbsolutePath());
         }
 
         // Periodic progress persistence — throttle to whole-percent changes to
