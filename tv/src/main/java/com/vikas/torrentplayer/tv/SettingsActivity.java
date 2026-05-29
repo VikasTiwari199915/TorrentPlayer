@@ -92,14 +92,46 @@ public class SettingsActivity extends FragmentActivity {
     }
 
     private void showSaveDirDialog() {
-        String path = TorrentManager.get().getSaveDir() != null
-                ? TorrentManager.get().getSaveDir().getAbsolutePath()
-                : "—";
-        long size = CacheCleaner.getCacheSize(this);
+        List<TorrentManager.VolumeInfo> vols = TorrentManager.get().getAvailableVolumes();
+        if (vols.size() > 1) {
+            showVolumePicker(vols);
+        } else {
+            // Single volume — just show info.
+            String path = TorrentManager.get().getSaveDir() != null
+                    ? TorrentManager.get().getSaveDir().getAbsolutePath() : "—";
+            String msg = path;
+            if (!vols.isEmpty()) {
+                TorrentManager.VolumeInfo v = vols.get(0);
+                msg += "\n\n" + FormatUtils.humanBytes(v.free) + " free / "
+                        + FormatUtils.humanBytes(v.total) + " total";
+            }
+            new AlertDialog.Builder(this)
+                    .setTitle("Save folder")
+                    .setMessage(msg)
+                    .setPositiveButton("OK", null)
+                    .show();
+        }
+    }
+
+    private void showVolumePicker(List<TorrentManager.VolumeInfo> vols) {
+        String[] labels = new String[vols.size()];
+        int checkedIdx = 0;
+        for (int i = 0; i < vols.size(); i++) {
+            TorrentManager.VolumeInfo v = vols.get(i);
+            labels[i] = v.label + "\n"
+                    + FormatUtils.humanBytes(v.free) + " free / "
+                    + FormatUtils.humanBytes(v.total) + " total";
+            if (v.isCurrent) checkedIdx = i;
+        }
+        final int[] selected = {checkedIdx};
         new AlertDialog.Builder(this)
-                .setTitle("Save folder")
-                .setMessage(path + "\n\nUsing " + FormatUtils.humanBytes(size))
-                .setPositiveButton("OK", null)
+                .setTitle("Choose save volume")
+                .setSingleChoiceItems(labels, checkedIdx, (d, which) -> selected[0] = which)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Save", (d, w) -> {
+                    TorrentManager.get().switchVolume(vols.get(selected[0]).root);
+                    adapter.notifyDataSetChanged();
+                })
                 .show();
     }
 
@@ -206,8 +238,16 @@ public class SettingsActivity extends FragmentActivity {
                     String path = TorrentManager.get().getSaveDir() != null
                             ? TorrentManager.get().getSaveDir().getAbsolutePath()
                             : "—";
-                    long size = CacheCleaner.getCacheSize(h.itemView.getContext());
-                    t2.setText(path + "  ·  " + FormatUtils.humanBytes(size));
+                    List<TorrentManager.VolumeInfo> vols = TorrentManager.get().getAvailableVolumes();
+                    TorrentManager.VolumeInfo cur = null;
+                    for (TorrentManager.VolumeInfo v : vols) { if (v.isCurrent) { cur = v; break; } }
+                    if (cur != null) {
+                        t2.setText(path + "  ·  "
+                                + FormatUtils.humanBytes(cur.free) + " free / "
+                                + FormatUtils.humanBytes(cur.total));
+                    } else {
+                        t2.setText(path);
+                    }
                     h.itemView.setOnClickListener(v -> showSaveDirDialog());
                     break;
                 case ITEM_CLEAR_CACHE:

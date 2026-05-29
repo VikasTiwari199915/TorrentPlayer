@@ -33,6 +33,7 @@ import com.vikas.torrentplayer.utils.FormatUtils;
 import com.vikas.torrentplayer.utils.PrefsManager;
 
 import java.io.File;
+import java.util.List;
 import java.util.concurrent.Executors;
 
 public class SettingsFragment extends PreferenceFragmentCompat
@@ -61,11 +62,14 @@ public class SettingsFragment extends PreferenceFragmentCompat
 
         Preference saveDir = findPreference("pref_save_dir");
         if (saveDir != null) {
-            File dir = TorrentManager.get().getSaveDir();
-            String path = dir != null ? dir.getAbsolutePath() : "—";
-            saveDir.setSummary(getString(R.string.pref_save_dir_summary_fmt, path));
+            refreshSaveDirSummary(saveDir);
             saveDir.setOnPreferenceClickListener(p -> {
-                openStorageInFiles();
+                List<TorrentManager.VolumeInfo> vols = TorrentManager.get().getAvailableVolumes();
+                if (vols.size() > 1) {
+                    showVolumePicker(saveDir, vols);
+                } else {
+                    openStorageInFiles();
+                }
                 return true;
             });
         }
@@ -139,9 +143,44 @@ public class SettingsFragment extends PreferenceFragmentCompat
         });
     }
 
-    /** Tap on the save-folder row — fire ACTION_VIEW so the system Files app
-     *  can browse the directory. Falls back to a toast on devices without a
-     *  matching activity. */
+    private void refreshSaveDirSummary(Preference pref) {
+        File dir = TorrentManager.get().getSaveDir();
+        if (dir == null) { pref.setSummary("—"); return; }
+        List<TorrentManager.VolumeInfo> vols = TorrentManager.get().getAvailableVolumes();
+        TorrentManager.VolumeInfo current = null;
+        for (TorrentManager.VolumeInfo v : vols) { if (v.isCurrent) { current = v; break; } }
+        String path = dir.getAbsolutePath();
+        if (current != null) {
+            pref.setSummary(path + "\n"
+                    + FormatUtils.humanBytes(current.free) + " free / "
+                    + FormatUtils.humanBytes(current.total) + " total");
+        } else {
+            pref.setSummary(path);
+        }
+    }
+
+    private void showVolumePicker(Preference saveDirPref, List<TorrentManager.VolumeInfo> vols) {
+        String[] labels = new String[vols.size()];
+        int checkedIdx = 0;
+        for (int i = 0; i < vols.size(); i++) {
+            TorrentManager.VolumeInfo v = vols.get(i);
+            labels[i] = v.label + "\n"
+                    + FormatUtils.humanBytes(v.free) + " free / "
+                    + FormatUtils.humanBytes(v.total) + " total";
+            if (v.isCurrent) checkedIdx = i;
+        }
+        final int[] selected = {checkedIdx};
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.pref_save_dir_title)
+                .setSingleChoiceItems(labels, checkedIdx, (d, which) -> selected[0] = which)
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .setPositiveButton(R.string.dialog_save, (d, w) -> {
+                    TorrentManager.get().switchVolume(vols.get(selected[0]).root);
+                    refreshSaveDirSummary(saveDirPref);
+                })
+                .show();
+    }
+
     private void openStorageInFiles() {
         File dir = TorrentManager.get().getSaveDir();
         if (dir == null) return;

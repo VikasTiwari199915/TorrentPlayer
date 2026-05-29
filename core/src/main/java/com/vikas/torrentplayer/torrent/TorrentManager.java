@@ -4,6 +4,8 @@ import android.content.Context;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.storage.StorageManager;
+import android.os.storage.StorageVolume;
 import android.util.Log;
 
 import androidx.annotation.MainThread;
@@ -112,6 +114,23 @@ public class TorrentManager {
     private final MutableLiveData<DownloadHandle> active = new MutableLiveData<>(null);
 
     private TorrentManager() {}
+
+    /** Snapshot of one writable volume the user can choose as the save location. */
+    public static class VolumeInfo {
+        public final File root;
+        public final long free;
+        public final long total;
+        public final boolean isCurrent;
+        public final String label;
+
+        VolumeInfo(File root, long free, long total, boolean isCurrent, String label) {
+            this.root = root;
+            this.free = free;
+            this.total = total;
+            this.isCurrent = isCurrent;
+            this.label = label;
+        }
+    }
 
     private static class TorrentRecord {
         Sha1Hash hash;
@@ -235,6 +254,23 @@ public class TorrentManager {
      * app-specific paths and the MediaScanner still picks up videos here.
      */
     private void chooseSaveDir() {
+        // Honour the user's explicit volume choice if it's still mounted.
+        String savedPath = prefs.getSaveVolumePath();
+        if (savedPath != null) {
+            File saved = new File(savedPath);
+            if (saved.exists() && saved.canWrite()) {
+                saveDir = new File(saved, "TorrentPlayer");
+                if (!saveDir.exists()) //noinspection ResultOfMethodCallIgnored
+                    saveDir.mkdirs();
+                usingPublicDownloads = false;
+                Log.i(TAG, "using user-selected save volume: " + saveDir.getAbsolutePath());
+                return;
+            }
+            // Volume no longer mounted — clear stale pref and auto-pick below.
+            prefs.setSaveVolumePath(null);
+            Log.w(TAG, "saved volume no longer available, falling back to auto-pick: " + savedPath);
+        }
+
         File chosen = null;
         long bestFree = -1;
         StringBuilder report = new StringBuilder();
@@ -262,6 +298,51 @@ public class TorrentManager {
         Log.i(TAG, "chose save dir: " + saveDir.getAbsolutePath()
                 + " (" + (bestFree / (1024 * 1024)) + " MB free)"
                 + " — candidates:" + report);
+    }
+
+    /**
+     * Returns all writable volumes available for saving downloads, with space info.
+     * Must be called after {@link #init}.
+     */
+    public List<VolumeInfo> getAvailableVolumes() {
+        List<VolumeInfo> result = new ArrayList<>();
+        if (appContext == null) return result;
+        StorageManager sm = (StorageManager) appContext.getSystemService(Context.STORAGE_SERVICE);
+        File[] media = appContext.getExternalMediaDirs();
+        if (media == null) return result;
+        for (File d : media) {
+            if (d == null) continue;
+            long free = d.getUsableSpace();
+            long total = d.getTotalSpace();
+            boolean isCurrent = saveDir != null && saveDir.getAbsolutePath().startsWith(d.getAbsolutePath());
+            String label;
+            try {
+                StorageVolume sv = sm != null ? sm.getStorageVolume(d) : null;
+                label = sv != null ? sv.getDescription(appContext) : d.getAbsolutePath();
+            } catch (Exception e) {
+                label = d.getAbsolutePath();
+            }
+            result.add(new VolumeInfo(d, free, total, isCurrent, label));
+        }
+        return result;
+    }
+
+    /**
+     * Switch the active save volume and persist the choice.
+     * Pass {@code null} to revert to automatic (largest free space).
+     */
+    public synchronized void switchVolume(@Nullable File volumeRoot) {
+        if (volumeRoot == null) {
+            prefs.setSaveVolumePath(null);
+            chooseSaveDir();
+        } else {
+            prefs.setSaveVolumePath(volumeRoot.getAbsolutePath());
+            saveDir = new File(volumeRoot, "TorrentPlayer");
+            if (!saveDir.exists()) //noinspection ResultOfMethodCallIgnored
+                saveDir.mkdirs();
+            usingPublicDownloads = false;
+            Log.i(TAG, "user switched save volume to: " + saveDir.getAbsolutePath());
+        }
     }
 
     /** Ask the system MediaScanner to index a freshly-finished file so gallery

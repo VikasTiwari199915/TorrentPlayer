@@ -20,6 +20,7 @@ public final class PrefsManager {
     public static final String KEY_VERIFIED_ONLY = "pref_verified_only";
     public static final String KEY_DELETE_ON_REMOVE = "pref_delete_on_remove";
     public static final String KEY_AUTO_RESUME = "pref_auto_resume";
+    public static final String KEY_SAVE_VOLUME_PATH = "pref_save_volume_path";
 
     private final SharedPreferences sp;
 
@@ -60,5 +61,16 @@ public final class PrefsManager {
      *  after launch — the user has to explicitly tap Resume per download. */
     public boolean isAutoResume() {
         return sp.getBoolean(KEY_AUTO_RESUME, false);
+    }
+
+    /** Path of the user-selected volume root (one of getExternalMediaDirs() entries).
+     *  Null means auto-pick (largest free space). */
+    public String getSaveVolumePath() {
+        return sp.getString(KEY_SAVE_VOLUME_PATH, null);
+    }
+
+    public void setSaveVolumePath(String path) {
+        if (path == null) sp.edit().remove(KEY_SAVE_VOLUME_PATH).apply();
+        else sp.edit().putString(KEY_SAVE_VOLUME_PATH, path).apply();
     }
 }
