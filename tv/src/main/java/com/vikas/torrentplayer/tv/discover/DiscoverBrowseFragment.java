@@ -97,6 +97,8 @@ public class DiscoverBrowseFragment extends BrowseSupportFragment {
                 getString(R.string.action_search), R.drawable.rounded_search_24));
         adapter.add(new ActionCard(ActionCard.DOWNLOADS,
                 getString(R.string.action_downloads), R.drawable.rounded_download_24));
+        adapter.add(new ActionCard(ActionCard.TORBOX,
+                getString(R.string.action_torbox), R.drawable.rounded_download_24));
         adapter.add(new ActionCard(ActionCard.SETTINGS,
                 getString(R.string.action_settings), R.drawable.rounded_settings_24));
         return new ListRow(ROW_LIBRARY,
@@ -196,6 +198,16 @@ public class DiscoverBrowseFragment extends BrowseSupportFragment {
                         break;
                     case ActionCard.DOWNLOADS:
                         startActivity(new Intent(requireContext(), TvDownloadsActivity.class));
+                        break;
+                    case ActionCard.TORBOX:
+                        if (new com.vikas.torrentplayer.utils.PrefsManager(requireContext()).hasTorBoxKey()) {
+                            startActivity(new Intent(requireContext(),
+                                    com.vikas.torrentplayer.tv.torbox.TvTorBoxLibraryActivity.class));
+                        } else {
+                            android.widget.Toast.makeText(requireContext(),
+                                    "Set your TorBox API key in Settings first",
+                                    android.widget.Toast.LENGTH_LONG).show();
+                        }
                         break;
                     case ActionCard.SETTINGS:
                         startActivity(new Intent(requireContext(), SettingsActivity.class));

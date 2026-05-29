@@ -22,7 +22,6 @@ import java.io.RandomAccessFile;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -34,24 +33,19 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 
 /**
- * Drives the "Download via TorBox" flow, kept completely separate from the
- * libtorrent engine so it can't destabilise it:
+ * Drives the TorBox flows (kept fully separate from the libtorrent engine):
+ * preparing a magnet, listing the account, resolving a streamable URL, deleting
+ * a torrent, and downloading a chosen file to the device.
  *
- * <ol>
- *   <li>add the magnet to TorBox ({@link TorBoxClient#addMagnet})</li>
- *   <li>poll until TorBox has the torrent on its servers</li>
- *   <li>resolve a direct HTTPS URL for the largest (video) file</li>
- *   <li>stream that URL to the app's save folder at full speed</li>
- * </ol>
- *
- * Progress is exposed as LiveData so the UI can render it; the actual work runs
- * on a single background thread (one download at a time — easy on weak boxes).
+ * <p>Network work runs on a single background thread; results are posted to the
+ * main thread. Local downloads are tracked as {@link Download} items exposed via
+ * LiveData so the Downloads screen can render live progress.
  */
 public final class TorBoxManager {
 
     private static final String TAG = "TorBoxManager";
     private static final long POLL_INTERVAL_MS = 4000L;
-    private static final long REMOTE_TIMEOUT_MS = 30 * 60 * 1000L; // 30 min for TorBox to fetch
+    private static final long REMOTE_TIMEOUT_MS = 30 * 60 * 1000L;
 
     private static final TorBoxManager INSTANCE = new TorBoxManager();
     public static TorBoxManager get() { return INSTANCE; }
@@ -68,48 +62,141 @@ public final class TorBoxManager {
     private TorBoxManager() {}
 
     public void init(Context ctx) {
-        if (appContext == null) appContext = ctx.getApplicationContext();
+        if (appContext == null && ctx != null) appContext = ctx.getApplicationContext();
+    }
+
+    public boolean hasKey() {
+        return appContext != null && new PrefsManager(appContext).hasTorBoxKey();
     }
 
     public LiveData<List<Download>> downloads() { return downloads; }
 
-    public enum State { ADDING, REMOTE, DOWNLOADING, DONE, ERROR }
+    // ------------------------------------------------------------------
+    // Callbacks (always invoked on the main thread)
+    // ------------------------------------------------------------------
 
-    /** One TorBox-backed download. Mutated on the main thread only. */
+    public interface Callback<T> {
+        void onResult(T result);
+        void onError(String message);
+    }
+
+    /** Progress while TorBox prepares (downloads) the torrent on its servers. */
+    public interface PrepareCallback {
+        void onProgress(int percent, String state);
+        void onReady(TorBoxClient.TbTorrent torrent);
+        void onError(String message);
+    }
+
+    // ------------------------------------------------------------------
+    // Local download tracking
+    // ------------------------------------------------------------------
+
+    public enum State { DOWNLOADING, DONE, ERROR }
+
     public static final class Download {
-        public final String key;       // infoHash (lower) or magnet
+        public final String key;
         public final String title;
-        public long torrentId;
-        public State state = State.ADDING;
-        public int percent;            // overall 0..100 for the current phase
-        public long speed;             // local download bytes/s
-        public File file;              // set when DONE
+        public State state = State.DOWNLOADING;
+        public int percent;
+        public long speed;
+        public File file;
         public String error;
-        public final AtomicBoolean cancelled = new AtomicBoolean(false);
-
+        final AtomicBoolean cancelled = new AtomicBoolean(false);
         Download(String key, String title) { this.key = key; this.title = title; }
     }
 
+    // ------------------------------------------------------------------
+    // Public async API
+    // ------------------------------------------------------------------
+
+    private TorBoxClient client() throws IOException {
+        String key = appContext != null ? new PrefsManager(appContext).getTorBoxKey() : "";
+        if (key == null || key.isEmpty()) throw new IOException("No TorBox API key set");
+        return new TorBoxClient(key);
+    }
+
     /**
-     * Begin a TorBox download for the given magnet. Safe to call from the main
-     * thread. If a download with the same key already exists it's returned as-is.
+     * Add a magnet and wait until TorBox has the content (instant if cached),
+     * then deliver the torrent with its file list. Reports preparation progress.
+     */
+    public void addAndPrepare(@NonNull String magnet, @NonNull PrepareCallback cb) {
+        io.execute(() -> {
+            try {
+                TorBoxClient c = client();
+                TorBoxClient.AddResult added = c.addMagnet(magnet);
+                long id = added.torrentId;
+
+                TorBoxClient.TbTorrent t = c.getTorrent(id);
+                long deadline = System.currentTimeMillis() + REMOTE_TIMEOUT_MS;
+                while ((t == null || !t.finished) && System.currentTimeMillis() < deadline) {
+                    int pct = t != null ? (int) Math.round(t.progress * 100) : 0;
+                    String state = t != null ? t.downloadState : "queued";
+                    main.post(() -> cb.onProgress(pct, state));
+                    sleep(POLL_INTERVAL_MS);
+                    t = c.getTorrent(id);
+                }
+                if (t == null || !t.finished) {
+                    postErr(cb, "TorBox timed out preparing the torrent");
+                    return;
+                }
+                final TorBoxClient.TbTorrent ready = t;
+                main.post(() -> cb.onReady(ready));
+            } catch (Throwable e) {
+                postErr(cb, msg(e));
+            }
+        });
+    }
+
+    /** Resolve a direct, streamable HTTPS URL for a file. */
+    public void resolveStreamUrl(long torrentId, int fileId, @NonNull Callback<String> cb) {
+        io.execute(() -> {
+            try {
+                String url = client().requestDownloadUrl(torrentId, fileId);
+                main.post(() -> cb.onResult(url));
+            } catch (Throwable e) {
+                main.post(() -> cb.onError(msg(e)));
+            }
+        });
+    }
+
+    /** List every torrent currently in the user's TorBox account. */
+    public void listAccount(@NonNull Callback<List<TorBoxClient.TbTorrent>> cb) {
+        io.execute(() -> {
+            try {
+                List<TorBoxClient.TbTorrent> list = client().listTorrents();
+                main.post(() -> cb.onResult(list));
+            } catch (Throwable e) {
+                main.post(() -> cb.onError(msg(e)));
+            }
+        });
+    }
+
+    /** Delete a torrent from the user's TorBox account. */
+    public void deleteFromAccount(long torrentId, @NonNull Callback<Void> cb) {
+        io.execute(() -> {
+            try {
+                client().controlTorrent(torrentId, "delete");
+                main.post(() -> cb.onResult(null));
+            } catch (Throwable e) {
+                main.post(() -> cb.onError(msg(e)));
+            }
+        });
+    }
+
+    /**
+     * Download a specific file of an already-prepared torrent to the device.
+     * Shows up in the Downloads list with live progress.
      */
     @MainThread
-    public Download startDownload(@NonNull String magnet, @NonNull String infoHash,
-                                  @NonNull String title) {
-        String key = (infoHash != null && !infoHash.isEmpty())
-                ? infoHash.toLowerCase(Locale.US) : magnet;
+    public Download downloadFile(long torrentId, int fileId, @NonNull String fileName,
+                                 @NonNull String title) {
+        String key = "tb:" + torrentId + ":" + fileId;
         Download existing = items.get(key);
-        if (existing != null
-                && existing.state != State.ERROR) {
-            return existing;
-        }
+        if (existing != null && existing.state != State.ERROR) return existing;
         Download d = new Download(key, title);
         items.put(key, d);
         publish();
-
-        final String apiKey = new PrefsManager(appContext).getTorBoxKey();
-        io.execute(() -> runDownload(d, magnet, apiKey));
+        io.execute(() -> runFileDownload(d, torrentId, fileId, fileName));
         return d;
     }
 
@@ -121,64 +208,31 @@ public final class TorBoxManager {
     }
 
     // ------------------------------------------------------------------
+    // Local download worker
+    // ------------------------------------------------------------------
 
-    private void runDownload(Download d, String magnet, String apiKey) {
+    private void runFileDownload(Download d, long torrentId, int fileId, String fileName) {
         try {
-            if (apiKey == null || apiKey.isEmpty()) {
-                fail(d, "No TorBox API key set");
-                return;
-            }
-            TorBoxClient client = new TorBoxClient(apiKey);
-
-            update(d, State.ADDING, 0, 0);
-            long torrentId = client.addMagnet(magnet);
-            d.torrentId = torrentId;
-
-            // Wait for TorBox to have the content on its servers.
-            TorBoxClient.TbTorrent t = null;
-            long deadline = System.currentTimeMillis() + REMOTE_TIMEOUT_MS;
-            while (System.currentTimeMillis() < deadline) {
-                if (d.cancelled.get()) return;
-                t = client.getTorrent(torrentId);
-                if (t != null && t.finished) break;
-                int pct = t != null ? (int) Math.round(t.progress * 100) : 0;
-                update(d, State.REMOTE, pct, t != null ? t.downloadSpeed : 0);
-                sleep(POLL_INTERVAL_MS);
-            }
-            if (t == null || !t.finished) {
-                fail(d, "TorBox timed out preparing the torrent");
-                return;
-            }
-
-            // Pick the largest file (the feature presentation / main video).
-            TorBoxClient.TbFile target = largest(t.files);
-            if (target == null) {
-                fail(d, "TorBox reported no files");
-                return;
-            }
-
-            String url = client.requestDownloadUrl(torrentId, target.id);
-            File out = destinationFor(t.name, target.name);
+            String url = client().requestDownloadUrl(torrentId, fileId);
+            File out = destinationFor(fileName);
             update(d, State.DOWNLOADING, 0, 0);
-            downloadToFile(d, url, out, target.size);
+            downloadToFile(d, url, out);
             if (d.cancelled.get()) {
                 //noinspection ResultOfMethodCallIgnored
                 out.delete();
                 return;
             }
-
             d.file = out;
             update(d, State.DONE, 100, 0);
             notifyMediaScanner(out);
             Log.i(TAG, "TorBox download complete: " + out.getAbsolutePath());
         } catch (Throwable e) {
             Log.e(TAG, "TorBox download failed", e);
-            fail(d, e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
+            fail(d, msg(e));
         }
     }
 
-    private void downloadToFile(Download d, String url, File out, long expectedSize)
-            throws IOException {
+    private void downloadToFile(Download d, String url, File out) throws IOException {
         //noinspection ResultOfMethodCallIgnored
         out.getParentFile().mkdirs();
         Request req = new Request.Builder().url(url).get().build();
@@ -186,13 +240,11 @@ public final class TorBoxManager {
             if (!resp.isSuccessful()) throw new IOException("HTTP " + resp.code());
             ResponseBody body = resp.body();
             if (body == null) throw new IOException("empty body");
-            long total = body.contentLength() > 0 ? body.contentLength() : expectedSize;
-            long done = 0;
-            long lastTs = System.currentTimeMillis();
-            long lastBytes = 0;
+            long total = body.contentLength();
+            long done = 0, lastBytes = 0, lastTs = System.currentTimeMillis();
             byte[] buf = new byte[256 * 1024];
             try (InputStream in = body.byteStream();
-                 OutputStream os = new RandomAccessFileOutputStream(out)) {
+                 OutputStream os = new TruncatingFileOutputStream(out)) {
                 int n;
                 while ((n = in.read(buf)) != -1) {
                     if (d.cancelled.get()) return;
@@ -210,10 +262,9 @@ public final class TorBoxManager {
         }
     }
 
-    /** Minimal OutputStream over a fresh file (truncating). */
-    private static final class RandomAccessFileOutputStream extends OutputStream {
+    private static final class TruncatingFileOutputStream extends OutputStream {
         private final RandomAccessFile raf;
-        RandomAccessFileOutputStream(File f) throws IOException {
+        TruncatingFileOutputStream(File f) throws IOException {
             this.raf = new RandomAccessFile(f, "rw");
             this.raf.setLength(0);
         }
@@ -224,29 +275,16 @@ public final class TorBoxManager {
         @Override public void close() throws IOException { raf.close(); }
     }
 
-    private File destinationFor(String torrentName, String fileName) {
+    private File destinationFor(String fileName) {
         File base = TorrentManager.get().getSaveDir();
         if (base == null) base = appContext.getExternalFilesDir(null);
         File dir = new File(base, "TorBox");
-        // Use just the leaf file name (TorBox file names can contain subpaths).
-        String leaf = fileName;
+        String leaf = fileName != null ? fileName : "torbox.mp4";
         int slash = Math.max(leaf.lastIndexOf('/'), leaf.lastIndexOf('\\'));
         if (slash >= 0 && slash < leaf.length() - 1) leaf = leaf.substring(slash + 1);
-        if (leaf.isEmpty()) leaf = sanitize(torrentName) + ".mp4";
+        leaf = leaf.replaceAll("[\\\\/:*?\"<>|]", "_");
+        if (leaf.isEmpty()) leaf = "torbox.mp4";
         return new File(dir, leaf);
-    }
-
-    private static String sanitize(String s) {
-        if (s == null || s.isEmpty()) return "torbox";
-        return s.replaceAll("[\\\\/:*?\"<>|]", "_");
-    }
-
-    private static TorBoxClient.TbFile largest(List<TorBoxClient.TbFile> files) {
-        TorBoxClient.TbFile best = null;
-        for (TorBoxClient.TbFile f : files) {
-            if (best == null || f.size > best.size) best = f;
-        }
-        return best;
     }
 
     private void notifyMediaScanner(File file) {
@@ -261,21 +299,18 @@ public final class TorBoxManager {
         try { Thread.sleep(ms); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
     }
 
-    private void update(Download d, State state, int percent, long speed) {
-        main.post(() -> {
-            d.state = state;
-            d.percent = percent;
-            d.speed = speed;
-            publish();
-        });
+    private static String msg(Throwable e) {
+        return e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
     }
 
-    private void fail(Download d, String msg) {
-        main.post(() -> {
-            d.state = State.ERROR;
-            d.error = msg;
-            publish();
-        });
+    private void postErr(PrepareCallback cb, String m) { main.post(() -> cb.onError(m)); }
+
+    private void update(Download d, State state, int percent, long speed) {
+        main.post(() -> { d.state = state; d.percent = percent; d.speed = speed; publish(); });
+    }
+
+    private void fail(Download d, String m) {
+        main.post(() -> { d.state = State.ERROR; d.error = m; publish(); });
     }
 
     @MainThread

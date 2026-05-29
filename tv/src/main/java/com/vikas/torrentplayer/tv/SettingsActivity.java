@@ -37,12 +37,13 @@ public class SettingsActivity extends FragmentActivity {
 
     private static final int ITEM_API_KEY = 0;
     private static final int ITEM_TORBOX_KEY = 1;
-    private static final int ITEM_SAVE_DIR = 2;
-    private static final int ITEM_STORAGE_ACCESS = 3;
-    private static final int ITEM_DIAGNOSTICS = 4;
-    private static final int ITEM_BACKDROP = 5;
-    private static final int ITEM_CLEAR_CACHE = 6;
-    private static final int ITEM_CHECK_UPDATES = 7;
+    private static final int ITEM_TORBOX_LIBRARY = 2;
+    private static final int ITEM_SAVE_DIR = 3;
+    private static final int ITEM_STORAGE_ACCESS = 4;
+    private static final int ITEM_DIAGNOSTICS = 5;
+    private static final int ITEM_BACKDROP = 6;
+    private static final int ITEM_CLEAR_CACHE = 7;
+    private static final int ITEM_CHECK_UPDATES = 8;
 
     private PrefsManager prefs;
     private RowsAdapter adapter;
@@ -282,8 +283,9 @@ public class SettingsActivity extends FragmentActivity {
 
     private class RowsAdapter extends RecyclerView.Adapter<RowsAdapter.VH> {
         private final List<Integer> rows = Arrays.asList(
-                ITEM_API_KEY, ITEM_TORBOX_KEY, ITEM_SAVE_DIR, ITEM_STORAGE_ACCESS,
-                ITEM_DIAGNOSTICS, ITEM_BACKDROP, ITEM_CLEAR_CACHE, ITEM_CHECK_UPDATES);
+                ITEM_API_KEY, ITEM_TORBOX_KEY, ITEM_TORBOX_LIBRARY, ITEM_SAVE_DIR,
+                ITEM_STORAGE_ACCESS, ITEM_DIAGNOSTICS, ITEM_BACKDROP,
+                ITEM_CLEAR_CACHE, ITEM_CHECK_UPDATES);
 
         @NonNull @Override
         public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
@@ -316,6 +318,19 @@ public class SettingsActivity extends FragmentActivity {
                             ? "Not set — enables full-speed \"Download via TorBox\""
                             : maskKey(tb));
                     h.itemView.setOnClickListener(v -> showTorBoxKeyDialog());
+                    break;
+                case ITEM_TORBOX_LIBRARY:
+                    t1.setText("TorBox library");
+                    t2.setText("Browse, stream, download or delete torrents in your account");
+                    h.itemView.setOnClickListener(v -> {
+                        if (!prefs.hasTorBoxKey()) {
+                            Toast.makeText(SettingsActivity.this,
+                                    "Set your TorBox API key first", Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        startActivity(new android.content.Intent(SettingsActivity.this,
+                                com.vikas.torrentplayer.tv.torbox.TvTorBoxLibraryActivity.class));
+                    });
                     break;
                 case ITEM_SAVE_DIR:
                     t1.setText("Save folder");

@@ -25,6 +25,7 @@ import com.vikas.torrentplayer.api.models.SearchResponse;
 import com.vikas.torrentplayer.api.models.SearchResult;
 import com.vikas.torrentplayer.api.models.TorrentItem;
 import com.vikas.torrentplayer.torbox.TorBoxManager;
+import com.vikas.torrentplayer.tv.torbox.TorBoxFileChooser;
 import com.vikas.torrentplayer.torrent.DownloadHandle;
 import com.vikas.torrentplayer.torrent.TorrentManager;
 import com.vikas.torrentplayer.tv.R;
@@ -209,10 +210,10 @@ public class TvDetailsActivity extends FragmentActivity {
         actions.add(() -> playViaP2p(t));
 
         if (hasTorBox) {
-            labels.add("Download via TorBox (full speed)");
-            actions.add(() -> downloadViaTorBox(t));
+            labels.add("Via TorBox (stream / download)");
+            actions.add(() -> startTorBox(t));
         } else {
-            labels.add("Download via TorBox — set API key in Settings");
+            labels.add("Via TorBox — set API key in Settings");
             actions.add(() -> android.widget.Toast.makeText(this,
                     "Add your TorBox API key in Settings first",
                     android.widget.Toast.LENGTH_LONG).show());
@@ -248,11 +249,10 @@ public class TvDetailsActivity extends FragmentActivity {
         }
     }
 
-    private void downloadViaTorBox(TorrentItem t) {
+    private void startTorBox(TorrentItem t) {
         String magnet = t.magnetUrl;
         if ((magnet == null || magnet.isEmpty())
                 && t.infoHash != null && !t.infoHash.isEmpty()) {
-            // Build a minimal magnet from the info hash if no full magnet given.
             magnet = "magnet:?xt=urn:btih:" + t.infoHash;
         }
         if (magnet == null || magnet.isEmpty()) {
@@ -261,14 +261,36 @@ public class TvDetailsActivity extends FragmentActivity {
                     android.widget.Toast.LENGTH_LONG).show();
             return;
         }
-        String title = item != null && item.title != null ? item.title
+        final String title = item != null && item.title != null ? item.title
                 : (t.rawTitle != null ? t.rawTitle : "Download");
         TorBoxManager.get().init(getApplicationContext());
-        TorBoxManager.get().startDownload(magnet,
-                t.infoHash != null ? t.infoHash : "", title);
-        android.widget.Toast.makeText(this,
-                "Sent to TorBox — track it in Downloads",
-                android.widget.Toast.LENGTH_LONG).show();
+
+        TextView msg = new TextView(this);
+        msg.setPadding(48, 40, 48, 24);
+        msg.setTextColor(0xFFFFFFFF);
+        msg.setText("Sending to TorBox…");
+        android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+                .setTitle("Preparing on TorBox")
+                .setView(msg)
+                .setCancelable(true)
+                .show();
+
+        TorBoxManager.get().addAndPrepare(magnet, new TorBoxManager.PrepareCallback() {
+            @Override public void onProgress(int percent, String state) {
+                if (!isFinishing()) msg.setText("TorBox " + state + " · " + percent + "%");
+            }
+            @Override public void onReady(com.vikas.torrentplayer.torbox.TorBoxClient.TbTorrent torrent) {
+                if (isFinishing()) return;
+                dlg.dismiss();
+                TorBoxFileChooser.show(TvDetailsActivity.this, torrent, title);
+            }
+            @Override public void onError(String message) {
+                if (isFinishing()) return;
+                dlg.dismiss();
+                android.widget.Toast.makeText(TvDetailsActivity.this,
+                        message, android.widget.Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     private class TorrentAdapter extends RecyclerView.Adapter<TorrentAdapter.VH> {

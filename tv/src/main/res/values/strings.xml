@@ -11,6 +11,7 @@
     <string name="row_quick_actions">Library</string>
     <string name="action_search">Search</string>
     <string name="action_downloads">Downloads</string>
+    <string name="action_torbox">TorBox</string>
     <string name="action_settings">Settings</string>
 
     <string name="search_hint">Title…</string>

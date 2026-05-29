@@ -13,6 +13,7 @@ import androidx.annotation.OptIn;
 import androidx.fragment.app.FragmentActivity;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.util.UnstableApi;
+import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.ui.PlayerView;
@@ -37,6 +38,7 @@ public class TvPlayerActivity extends FragmentActivity {
 
     private static final String EXTRA_HASH = "hash";
     private static final String EXTRA_FILE = "file";
+    private static final String EXTRA_URL = "url";
     private static final String EXTRA_TITLE = "title";
 
     public static void start(Context ctx, String infoHash) {
@@ -49,6 +51,15 @@ public class TvPlayerActivity extends FragmentActivity {
     public static void startFile(Context ctx, String absPath, String title) {
         Intent i = new Intent(ctx, TvPlayerActivity.class);
         i.putExtra(EXTRA_FILE, absPath);
+        i.putExtra(EXTRA_TITLE, title);
+        ctx.startActivity(i);
+    }
+
+    /** Stream a remote HTTPS URL directly (e.g. a cached TorBox file) — ExoPlayer
+     *  uses HTTP range requests, so MP4 and MKV both start without downloading. */
+    public static void startUrl(Context ctx, String url, String title) {
+        Intent i = new Intent(ctx, TvPlayerActivity.class);
+        i.putExtra(EXTRA_URL, url);
         i.putExtra(EXTRA_TITLE, title);
         ctx.startActivity(i);
     }
@@ -69,14 +80,18 @@ public class TvPlayerActivity extends FragmentActivity {
         loadingTitle = findViewById(R.id.loading_title);
         loadingProgress = findViewById(R.id.loading_progress);
 
-        // Direct local-file playback (TorBox download) — no torrent engine needed.
+        // Direct playback (TorBox): a local file, or a remote streamable URL.
         String filePath = getIntent().getStringExtra(EXTRA_FILE);
-        if (filePath != null && !filePath.isEmpty()) {
-            String title = getIntent().getStringExtra(EXTRA_TITLE);
+        String streamUrl = getIntent().getStringExtra(EXTRA_URL);
+        if ((filePath != null && !filePath.isEmpty()) || (streamUrl != null && !streamUrl.isEmpty())) {
             try {
-                playLocalFile(new File(filePath), title);
+                if (filePath != null && !filePath.isEmpty()) {
+                    playLocalFile(new File(filePath));
+                } else {
+                    playDirectUri(Uri.parse(streamUrl));
+                }
             } catch (Throwable ex) {
-                android.util.Log.e("TvPlayer", "local file playback failed", ex);
+                android.util.Log.e("TvPlayer", "direct playback failed", ex);
                 android.widget.Toast.makeText(this,
                         "Player error: " + (ex.getMessage() != null ? ex.getMessage()
                                 : ex.getClass().getSimpleName()),
@@ -110,8 +125,16 @@ public class TvPlayerActivity extends FragmentActivity {
         }
     }
 
+    /** Renderers with decoder fallback enabled so a failing primary audio/video
+     *  decoder is retried with an alternate one instead of producing silence /
+     *  a black frame. */
+    private DefaultRenderersFactory renderersFactory() {
+        return new DefaultRenderersFactory(this)
+                .setEnableDecoderFallback(true);
+    }
+
     private void setupPlayer() {
-        ExoPlayer.Builder b = new ExoPlayer.Builder(this);
+        ExoPlayer.Builder b = new ExoPlayer.Builder(this, renderersFactory());
 
         DownloadHandle.State s = handle.state.getValue();
         boolean isActive = s == DownloadHandle.State.STARTING
@@ -169,20 +192,25 @@ public class TvPlayerActivity extends FragmentActivity {
     }
 
     /** Plain ExoPlayer playback of a finished local file (no TorrentDataSource). */
-    private void playLocalFile(File file, @Nullable String title) {
+    private void playLocalFile(File file) {
         if (!file.exists()) {
             android.widget.Toast.makeText(this, "File not found",
                     android.widget.Toast.LENGTH_LONG).show();
             finish();
             return;
         }
-        player = new ExoPlayer.Builder(this).build();
+        playDirectUri(Uri.fromFile(file));
+    }
+
+    /** Plain ExoPlayer playback of any directly-readable URI (local or HTTP). */
+    private void playDirectUri(Uri uri) {
+        player = new ExoPlayer.Builder(this, renderersFactory()).build();
         playerView.setPlayer(player);
         player.setTrackSelectionParameters(
                 player.getTrackSelectionParameters().buildUpon()
                         .setPreferredTextLanguage(java.util.Locale.getDefault().getLanguage())
                         .build());
-        player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)));
+        player.setMediaItem(MediaItem.fromUri(uri));
         player.setPlayWhenReady(true);
         player.prepare();
         player.play();

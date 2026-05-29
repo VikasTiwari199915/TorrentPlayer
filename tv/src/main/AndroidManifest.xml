@@ -83,6 +83,11 @@
             android:exported="false"
             android:parentActivityName=".TvMainActivity" />
 
+        <activity
+            android:name=".torbox.TvTorBoxLibraryActivity"
+            android:exported="false"
+            android:parentActivityName=".SettingsActivity" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

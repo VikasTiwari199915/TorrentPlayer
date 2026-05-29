@@ -276,8 +276,6 @@ public class TvDownloadsActivity extends FragmentActivity {
         private void bindDynamic(VH h, TorBoxManager.Download d) {
             String meta;
             switch (d.state) {
-                case ADDING:      meta = "Sending to TorBox…"; break;
-                case REMOTE:      meta = "TorBox preparing · " + d.percent + "%"; break;
                 case DOWNLOADING: meta = "Downloading · " + d.percent + "%  ·  "
                         + FormatUtils.humanSpeed(d.speed); break;
                 case DONE:        meta = "Done · tap to play"; break;

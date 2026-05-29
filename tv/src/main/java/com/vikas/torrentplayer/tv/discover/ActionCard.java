@@ -2,11 +2,12 @@ package com.vikas.torrentplayer.tv.discover;
 
 import androidx.annotation.DrawableRes;
 
-/** Action cards on the "Library" row (Search / Downloads / Settings). */
+/** Action cards on the "Library" row (Search / Downloads / TorBox / Settings). */
 public class ActionCard {
     public static final int SEARCH = 1;
     public static final int DOWNLOADS = 2;
     public static final int SETTINGS = 3;
+    public static final int TORBOX = 4;
 
     public final int id;
     public final String label;
