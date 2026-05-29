@@ -17,7 +17,6 @@ import com.vikas.torrentplayer.utils.PrefsManager;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -61,8 +60,69 @@ public final class TorBoxManager {
 
     private TorBoxManager() {}
 
+    private boolean loaded;
+
     public void init(Context ctx) {
         if (appContext == null && ctx != null) appContext = ctx.getApplicationContext();
+        if (appContext != null && !loaded) {
+            loaded = true;
+            io.execute(this::restoreFromDb);
+        }
+    }
+
+    /** Rebuild the in-memory list from Room. Finished files that still exist stay
+     *  DONE (tap-to-play); interrupted ones resume from where they left off. */
+    private void restoreFromDb() {
+        List<com.vikas.torrentplayer.db.TorBoxEntity> rows;
+        try { rows = dao().getAll(); }
+        catch (Throwable t) { Log.e(TAG, "TorBox DB read failed", t); return; }
+        if (rows == null) return;
+        List<Runnable> toResume = new ArrayList<>();
+        for (com.vikas.torrentplayer.db.TorBoxEntity e : rows) {
+            Download d = new Download(e.key, e.title != null ? e.title : "Download");
+            d.torrentId = e.torrentId;
+            d.fileId = e.fileId;
+            d.fileName = e.fileName;
+            d.size = e.sizeBytes;
+            d.percent = e.lastProgress;
+            d.file = e.filePath != null ? new File(e.filePath) : null;
+            State saved = e.lastState >= 0 && e.lastState < State.values().length
+                    ? State.values()[e.lastState] : State.ERROR;
+            boolean fileOk = d.file != null && d.file.exists() && d.file.length() > 0;
+            if (saved == State.DONE && fileOk) {
+                d.state = State.DONE;
+            } else if (fileOk || saved == State.DOWNLOADING) {
+                // Interrupted mid-download — resume in the background.
+                d.state = State.DOWNLOADING;
+                toResume.add(() -> runFileDownload(d));
+            } else {
+                d.state = State.ERROR;
+                d.error = "File missing";
+            }
+            items.put(d.key, d);
+        }
+        main.post(this::publish);
+        for (Runnable r : toResume) io.execute(r);
+    }
+
+    private com.vikas.torrentplayer.db.TorBoxDao dao() {
+        return com.vikas.torrentplayer.db.AppDatabase.get(appContext).torBoxDao();
+    }
+
+    private void persist(Download d) {
+        if (appContext == null) return;
+        com.vikas.torrentplayer.db.TorBoxEntity e = new com.vikas.torrentplayer.db.TorBoxEntity();
+        e.key = d.key;
+        e.title = d.title;
+        e.torrentId = d.torrentId;
+        e.fileId = d.fileId;
+        e.fileName = d.fileName;
+        e.filePath = d.file != null ? d.file.getAbsolutePath() : null;
+        e.sizeBytes = d.size;
+        e.lastState = d.state.ordinal();
+        e.lastProgress = d.percent;
+        e.addedAt = System.currentTimeMillis();
+        io.execute(() -> { try { dao().upsert(e); } catch (Throwable ignored) {} });
     }
 
     public boolean hasKey() {
@@ -96,6 +156,10 @@ public final class TorBoxManager {
     public static final class Download {
         public final String key;
         public final String title;
+        public long torrentId;
+        public int fileId;
+        public String fileName;
+        public long size;          // expected total bytes
         public State state = State.DOWNLOADING;
         public int percent;
         public long speed;
@@ -189,15 +253,29 @@ public final class TorBoxManager {
      */
     @MainThread
     public Download downloadFile(long torrentId, int fileId, @NonNull String fileName,
-                                 @NonNull String title) {
+                                 long size, @NonNull String title) {
         String key = "tb:" + torrentId + ":" + fileId;
         Download existing = items.get(key);
         if (existing != null && existing.state != State.ERROR) return existing;
         Download d = new Download(key, title);
+        d.torrentId = torrentId;
+        d.fileId = fileId;
+        d.fileName = fileName;
+        d.size = size;
+        d.file = destinationFor(fileName);   // known up front so partial-play has a path
         items.put(key, d);
         publish();
-        io.execute(() -> runFileDownload(d, torrentId, fileId, fileName));
+        persist(d);
+        io.execute(() -> runFileDownload(d));
         return d;
+    }
+
+    /** Cancel + forget every TorBox download (used by the cache cleaner). The
+     *  DB rows and on-disk files are wiped by {@code CacheCleaner} itself. */
+    public void clearAll() {
+        for (Download d : items.values()) d.cancelled.set(true);
+        items.clear();
+        main.post(this::publish);
     }
 
     @MainThread
@@ -205,24 +283,25 @@ public final class TorBoxManager {
         Download d = items.remove(key);
         if (d != null) d.cancelled.set(true);
         publish();
+        io.execute(() -> { try { dao().deleteByKey(key); } catch (Throwable ignored) {} });
     }
 
     // ------------------------------------------------------------------
     // Local download worker
     // ------------------------------------------------------------------
 
-    private void runFileDownload(Download d, long torrentId, int fileId, String fileName) {
+    private void runFileDownload(Download d) {
         try {
-            String url = client().requestDownloadUrl(torrentId, fileId);
-            File out = destinationFor(fileName);
-            update(d, State.DOWNLOADING, 0, 0);
+            String url = client().requestDownloadUrl(d.torrentId, d.fileId);
+            File out = d.file != null ? d.file : destinationFor(d.fileName);
+            d.file = out;
+            update(d, State.DOWNLOADING, d.percent, 0);
             downloadToFile(d, url, out);
             if (d.cancelled.get()) {
                 //noinspection ResultOfMethodCallIgnored
                 out.delete();
                 return;
             }
-            d.file = out;
             update(d, State.DONE, 100, 0);
             notifyMediaScanner(out);
             Log.i(TAG, "TorBox download complete: " + out.getAbsolutePath());
@@ -232,23 +311,34 @@ public final class TorBoxManager {
         }
     }
 
+    /** Streams the file to disk, resuming via a Range request if a partial file
+     *  already exists. The file grows sequentially, which is what lets a player
+     *  read the head while the rest is still arriving. */
     private void downloadToFile(Download d, String url, File out) throws IOException {
         //noinspection ResultOfMethodCallIgnored
         out.getParentFile().mkdirs();
-        Request req = new Request.Builder().url(url).get().build();
-        try (Response resp = fileHttp.newCall(req).execute()) {
+        long existing = out.exists() ? out.length() : 0;
+        boolean resume = existing > 0 && (d.size <= 0 || existing < d.size);
+
+        Request.Builder rb = new Request.Builder().url(url).get();
+        if (resume) rb.header("Range", "bytes=" + existing + "-");
+        try (Response resp = fileHttp.newCall(rb.build()).execute()) {
             if (!resp.isSuccessful()) throw new IOException("HTTP " + resp.code());
             ResponseBody body = resp.body();
             if (body == null) throw new IOException("empty body");
-            long total = body.contentLength();
-            long done = 0, lastBytes = 0, lastTs = System.currentTimeMillis();
+            boolean append = resume && resp.code() == 206;  // server honoured the range
+            long total = d.size > 0 ? d.size
+                    : (append ? existing + body.contentLength() : body.contentLength());
+            long done = append ? existing : 0;
+            long lastBytes = done, lastTs = System.currentTimeMillis();
             byte[] buf = new byte[256 * 1024];
             try (InputStream in = body.byteStream();
-                 OutputStream os = new TruncatingFileOutputStream(out)) {
+                 RandomAccessFile raf = new RandomAccessFile(out, "rw")) {
+                if (append) raf.seek(existing); else raf.setLength(0);
                 int n;
                 while ((n = in.read(buf)) != -1) {
                     if (d.cancelled.get()) return;
-                    os.write(buf, 0, n);
+                    raf.write(buf, 0, n);
                     done += n;
                     long now = System.currentTimeMillis();
                     if (now - lastTs >= 700) {
@@ -260,19 +350,6 @@ public final class TorBoxManager {
                 }
             }
         }
-    }
-
-    private static final class TruncatingFileOutputStream extends OutputStream {
-        private final RandomAccessFile raf;
-        TruncatingFileOutputStream(File f) throws IOException {
-            this.raf = new RandomAccessFile(f, "rw");
-            this.raf.setLength(0);
-        }
-        @Override public void write(int b) throws IOException { raf.write(b); }
-        @Override public void write(@NonNull byte[] b, int off, int len) throws IOException {
-            raf.write(b, off, len);
-        }
-        @Override public void close() throws IOException { raf.close(); }
     }
 
     private File destinationFor(String fileName) {
@@ -306,11 +383,17 @@ public final class TorBoxManager {
     private void postErr(PrepareCallback cb, String m) { main.post(() -> cb.onError(m)); }
 
     private void update(Download d, State state, int percent, long speed) {
-        main.post(() -> { d.state = state; d.percent = percent; d.speed = speed; publish(); });
+        main.post(() -> {
+            boolean stateChanged = d.state != state;
+            d.state = state; d.percent = percent; d.speed = speed;
+            publish();
+            // Persist on state transitions and completion (not every speed tick).
+            if (stateChanged || state == State.DONE) persist(d);
+        });
     }
 
     private void fail(Download d, String m) {
-        main.post(() -> { d.state = State.ERROR; d.error = m; publish(); });
+        main.post(() -> { d.state = State.ERROR; d.error = m; publish(); persist(d); });
     }
 
     @MainThread

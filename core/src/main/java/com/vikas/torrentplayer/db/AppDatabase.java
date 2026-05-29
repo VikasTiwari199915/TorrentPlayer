@@ -6,10 +6,12 @@ import androidx.room.Database;
 import androidx.room.Room;
 import androidx.room.RoomDatabase;
 
-@Database(entities = { DownloadEntity.class }, version = 1, exportSchema = false)
+@Database(entities = { DownloadEntity.class, TorBoxEntity.class }, version = 2, exportSchema = false)
 public abstract class AppDatabase extends RoomDatabase {
 
     public abstract DownloadDao downloadDao();
+
+    public abstract TorBoxDao torBoxDao();
 
     private static volatile AppDatabase INSTANCE;
 

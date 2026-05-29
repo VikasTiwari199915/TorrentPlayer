@@ -329,6 +329,12 @@ public class TvDownloadsActivity extends FragmentActivity {
         if (d.state == TorBoxManager.State.DONE && d.file != null) {
             labels.add("Play");
             actions.add(() -> TvPlayerActivity.startFile(this, d.file.getAbsolutePath(), d.title));
+        } else if (d.state == TorBoxManager.State.DOWNLOADING
+                && d.file != null && d.file.exists()) {
+            // Partial playback — best-effort, works for progressive MKV.
+            labels.add("Play now (still downloading)");
+            actions.add(() -> TvPlayerActivity.startGrowingFile(
+                    this, d.file.getAbsolutePath(), d.size, d.title));
         }
         labels.add("Remove from list");
         actions.add(() -> {

@@ -6,6 +6,7 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 
 import com.vikas.torrentplayer.db.AppDatabase;
+import com.vikas.torrentplayer.torbox.TorBoxManager;
 import com.vikas.torrentplayer.torrent.TorrentManager;
 
 import java.io.File;
@@ -43,11 +44,17 @@ public final class CacheCleaner {
     public static long clearAll(@NonNull Context ctx) {
         long before = getCacheSize(ctx);
 
-        // 1. Stop libtorrent on every download so files aren't held open.
+        // 1. Stop libtorrent on every download so files aren't held open, and
+        //    cancel/forget in-flight TorBox downloads (files swept in step 2).
         try {
             TorrentManager.get().removeAllSilently(/* deleteFiles = */ true);
         } catch (Throwable t) {
             Log.e(TAG, "removeAllSilently failed", t);
+        }
+        try {
+            TorBoxManager.get().clearAll();
+        } catch (Throwable t) {
+            Log.e(TAG, "TorBox clearAll failed", t);
         }
 
         // 2. Sweep anything still on disk under the save dir (covers .meta/,
@@ -63,6 +70,7 @@ public final class CacheCleaner {
         //    next launch.
         try {
             AppDatabase.get(ctx).downloadDao().deleteAll();
+            AppDatabase.get(ctx).torBoxDao().deleteAll();
         } catch (Throwable t) {
             Log.e(TAG, "DB clear failed", t);
         }

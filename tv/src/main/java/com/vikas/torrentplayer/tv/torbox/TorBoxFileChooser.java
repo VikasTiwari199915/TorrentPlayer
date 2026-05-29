@@ -60,7 +60,7 @@ public final class TorBoxFileChooser {
         labels.add("Download to device");
         actions.add(() -> {
             TorBoxManager.get().downloadFile(torrent.id, file.id,
-                    file.shortName != null ? file.shortName : file.name, title);
+                    file.shortName != null ? file.shortName : file.name, file.size, title);
             Toast.makeText(ctx, "Downloading — track it in Downloads", Toast.LENGTH_LONG).show();
         });
 

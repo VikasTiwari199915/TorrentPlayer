@@ -43,6 +43,8 @@ public class TvPlayerActivity extends FragmentActivity {
     private static final String EXTRA_HASH = "hash";
     private static final String EXTRA_FILE = "file";
     private static final String EXTRA_URL = "url";
+    private static final String EXTRA_GROW_FILE = "grow_file";
+    private static final String EXTRA_GROW_SIZE = "grow_size";
     private static final String EXTRA_TITLE = "title";
 
     public static void start(Context ctx, String infoHash) {
@@ -68,6 +70,15 @@ public class TvPlayerActivity extends FragmentActivity {
         ctx.startActivity(i);
     }
 
+    /** Play a still-downloading local file (grows sequentially). Best for MKV. */
+    public static void startGrowingFile(Context ctx, String absPath, long totalSize, String title) {
+        Intent i = new Intent(ctx, TvPlayerActivity.class);
+        i.putExtra(EXTRA_GROW_FILE, absPath);
+        i.putExtra(EXTRA_GROW_SIZE, totalSize);
+        i.putExtra(EXTRA_TITLE, title);
+        ctx.startActivity(i);
+    }
+
     private PlayerView playerView;
     private LinearLayout loadingOverlay;
     private TextView loadingTitle, loadingProgress;
@@ -84,12 +95,18 @@ public class TvPlayerActivity extends FragmentActivity {
         loadingTitle = findViewById(R.id.loading_title);
         loadingProgress = findViewById(R.id.loading_progress);
 
-        // Direct playback (TorBox): a local file, or a remote streamable URL.
+        // Direct playback (TorBox): a local file, a remote URL, or a growing
+        // (still-downloading) local file.
         String filePath = getIntent().getStringExtra(EXTRA_FILE);
         String streamUrl = getIntent().getStringExtra(EXTRA_URL);
-        if ((filePath != null && !filePath.isEmpty()) || (streamUrl != null && !streamUrl.isEmpty())) {
+        String growFile = getIntent().getStringExtra(EXTRA_GROW_FILE);
+        if ((filePath != null && !filePath.isEmpty())
+                || (streamUrl != null && !streamUrl.isEmpty())
+                || (growFile != null && !growFile.isEmpty())) {
             try {
-                if (filePath != null && !filePath.isEmpty()) {
+                if (growFile != null && !growFile.isEmpty()) {
+                    playGrowingFile(new File(growFile), getIntent().getLongExtra(EXTRA_GROW_SIZE, 0));
+                } else if (filePath != null && !filePath.isEmpty()) {
                     playLocalFile(new File(filePath));
                 } else {
                     playDirectUri(Uri.parse(streamUrl));
@@ -207,6 +224,29 @@ public class TvPlayerActivity extends FragmentActivity {
         playDirectUri(Uri.fromFile(file));
     }
 
+    /** Play a file that's still downloading: blocks reads at the current EOF
+     *  until the downloader appends more (works best for progressive MKV). */
+    private void playGrowingFile(File file, long totalSize) {
+        com.vikas.torrentplayer.torbox.GrowingFileDataSource.Factory factory =
+                new com.vikas.torrentplayer.torbox.GrowingFileDataSource.Factory(file, totalSize);
+        player = new ExoPlayer.Builder(this, renderersFactory())
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(this)
+                        .setDataSourceFactory(factory))
+                .build();
+        playerView.setPlayer(player);
+        attachAudioDiagnostics();
+        player.setTrackSelectionParameters(
+                player.getTrackSelectionParameters().buildUpon()
+                        .setPreferredTextLanguage(java.util.Locale.getDefault().getLanguage())
+                        .build());
+        player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)));
+        player.setPlayWhenReady(true);
+        player.prepare();
+        player.play();
+        playbackStarted = true;
+        loadingOverlay.setVisibility(View.GONE);
+    }
+
     /** Plain ExoPlayer playback of any directly-readable URI (local or HTTP). */
     /**
      * Surfaces why audio might be silent: inspects the resolved tracks and, if
@@ -241,7 +281,7 @@ public class TvPlayerActivity extends FragmentActivity {
                     reported = true;
                     android.widget.Toast.makeText(TvPlayerActivity.this,
                             "No audio: this device can't decode " + firstCodec
-                                    + " (try a different release, or enable FFmpeg audio)",
+                                    + " — try an AAC/AC3 release of this title",
                             android.widget.Toast.LENGTH_LONG).show();
                 }
             }
