@@ -17,15 +17,20 @@ import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 
 import com.bumptech.glide.Glide;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.vikas.torrentplayer.R;
 import com.vikas.torrentplayer.api.models.DiscoverItem;
 import com.vikas.torrentplayer.api.models.SearchResult;
 import com.vikas.torrentplayer.api.models.TorrentItem;
 import com.vikas.torrentplayer.databinding.ActivityDetailBinding;
+import com.vikas.torrentplayer.torbox.TorBoxClient;
+import com.vikas.torrentplayer.torbox.TorBoxManager;
 import com.vikas.torrentplayer.torrent.DownloadHandle;
 import com.vikas.torrentplayer.torrent.TorrentManager;
 import com.vikas.torrentplayer.ui.player.PlayerActivity;
+import com.vikas.torrentplayer.ui.torbox.TorBoxFileChooser;
 import com.vikas.torrentplayer.utils.MagnetUtils;
+import com.vikas.torrentplayer.utils.PrefsManager;
 
 import java.util.List;
 
@@ -110,6 +115,10 @@ public class DetailActivity extends AppCompatActivity {
             public void onMagnetLong(TorrentItem item) {
                 MagnetUtils.copyMagnet(DetailActivity.this, item.magnetUrl);
             }
+            @Override
+            public void onDownloadLong(TorrentItem item) {
+                startTorBox(item);
+            }
         });
         b.torrentsRecycler.setLayoutManager(new LinearLayoutManager(this));
         b.torrentsRecycler.setAdapter(adapter);
@@ -126,6 +135,49 @@ public class DetailActivity extends AppCompatActivity {
         // The AppBarLayout already declares fitsSystemWindows="true", so insets
         // are applied automatically. Adding a manual listener here would
         // double-pad the toolbar.
+    }
+
+    /** Long-press Download → get this torrent via TorBox (stream or download). */
+    private void startTorBox(TorrentItem item) {
+        if (!new PrefsManager(this).hasTorBoxKey()) {
+            Toast.makeText(this, "Add your TorBox API key in Settings first",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        String magnet = item.magnetUrl;
+        if ((magnet == null || magnet.isEmpty()) && item.infoHash != null && !item.infoHash.isEmpty()) {
+            magnet = "magnet:?xt=urn:btih:" + item.infoHash;
+        }
+        if (magnet == null || magnet.isEmpty()) {
+            Toast.makeText(this, "This torrent has no magnet/hash for TorBox",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        final String title = vm != null && vm.result() != null && vm.result().title != null
+                ? vm.result().title : (item.rawTitle != null ? item.rawTitle : "Download");
+        TorBoxManager.get().init(getApplicationContext());
+
+        androidx.appcompat.app.AlertDialog dlg = new MaterialAlertDialogBuilder(this)
+                .setTitle("Preparing on TorBox")
+                .setMessage("Sending to TorBox…")
+                .setCancelable(true)
+                .show();
+
+        TorBoxManager.get().addAndPrepare(magnet, new TorBoxManager.PrepareCallback() {
+            @Override public void onProgress(int percent, String state) {
+                if (!isFinishing()) dlg.setMessage("TorBox " + state + " · " + percent + "%");
+            }
+            @Override public void onReady(TorBoxClient.TbTorrent torrent) {
+                if (isFinishing()) return;
+                dlg.dismiss();
+                TorBoxFileChooser.show(DetailActivity.this, torrent, title);
+            }
+            @Override public void onError(String message) {
+                if (isFinishing()) return;
+                dlg.dismiss();
+                Toast.makeText(DetailActivity.this, message, Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     /**

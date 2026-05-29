@@ -22,6 +22,7 @@ public class DownloadsFragment extends Fragment {
 
     private FragmentDownloadsBinding b;
     private DownloadsAdapter adapter;
+    private TorBoxDownloadsAdapter torBoxAdapter;
 
     @Nullable
     @Override
@@ -61,19 +62,55 @@ public class DownloadsFragment extends Fragment {
             }
         });
 
-        b.recycler.setLayoutManager(new LinearLayoutManager(requireContext()));
-        b.recycler.setAdapter(adapter);
+        torBoxAdapter = new TorBoxDownloadsAdapter(new TorBoxDownloadsAdapter.Listener() {
+            @Override public void onPlay(com.vikas.torrentplayer.torbox.TorBoxManager.Download d) {
+                if (d.file == null) return;
+                if (d.state == com.vikas.torrentplayer.torbox.TorBoxManager.State.DONE) {
+                    PlayerActivity.startFile(requireContext(), d.file.getAbsolutePath());
+                } else {
+                    // Partial playback while downloading (best for progressive MKV).
+                    PlayerActivity.startGrowingFile(requireContext(), d.file.getAbsolutePath(), d.size);
+                }
+            }
+            @Override public void onPauseToggle(com.vikas.torrentplayer.torbox.TorBoxManager.Download d) {
+                if (d.state == com.vikas.torrentplayer.torbox.TorBoxManager.State.PAUSED) {
+                    com.vikas.torrentplayer.torbox.TorBoxManager.get().resume(d.key);
+                } else {
+                    com.vikas.torrentplayer.torbox.TorBoxManager.get().pause(d.key);
+                }
+            }
+            @Override public void onRemove(com.vikas.torrentplayer.torbox.TorBoxManager.Download d) {
+                com.vikas.torrentplayer.torbox.TorBoxManager.get().remove(d.key);
+            }
+        });
 
+        b.recycler.setLayoutManager(new LinearLayoutManager(requireContext()));
+        b.recycler.setAdapter(new androidx.recyclerview.widget.ConcatAdapter(adapter, torBoxAdapter));
+
+        com.vikas.torrentplayer.torbox.TorBoxManager.get().init(requireContext().getApplicationContext());
         TorrentManager.get().downloads().observe(getViewLifecycleOwner(), list -> {
             adapter.submitList(list);
-            boolean empty = list == null || list.isEmpty();
-            b.emptyState.setVisibility(empty ? View.VISIBLE : View.GONE);
-            b.recycler.setVisibility(empty ? View.GONE : View.VISIBLE);
+            updateEmpty();
         });
+        com.vikas.torrentplayer.torbox.TorBoxManager.get().downloads()
+                .observe(getViewLifecycleOwner(), list -> {
+                    torBoxAdapter.submitList(list == null ? new java.util.ArrayList<>()
+                            : new java.util.ArrayList<>(list));
+                    updateEmpty();
+                });
 
         // Insets handled declaratively by android:fitsSystemWindows on the
         // AppBarLayout — no manual padding here, otherwise the toolbar gets
         // double-padded and the title clips into the status bar.
+    }
+
+    private void updateEmpty() {
+        if (b == null) return;
+        int count = (adapter == null ? 0 : adapter.getItemCount())
+                + (torBoxAdapter == null ? 0 : torBoxAdapter.getItemCount());
+        boolean empty = count == 0;
+        b.emptyState.setVisibility(empty ? View.VISIBLE : View.GONE);
+        b.recycler.setVisibility(empty ? View.GONE : View.VISIBLE);
     }
 
     @Override

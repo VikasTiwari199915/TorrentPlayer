@@ -71,6 +71,12 @@
             android:label="@string/details_title" />
 
         <activity
+            android:name=".ui.torbox.TorBoxLibraryActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity"
+            android:label="TorBox library" />
+
+        <activity
             android:name=".ui.player.PlayerActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout"

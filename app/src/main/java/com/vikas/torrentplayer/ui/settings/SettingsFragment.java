@@ -56,6 +56,26 @@ public class SettingsFragment extends PreferenceFragmentCompat
             refreshApiKeySummary();
         }
 
+        Preference torboxKey = findPreference("pref_torbox_key");
+        if (torboxKey != null) {
+            refreshTorBoxSummary(torboxKey);
+            torboxKey.setOnPreferenceClickListener(p -> { showTorBoxKeyDialog(torboxKey); return true; });
+        }
+
+        Preference torboxLib = findPreference("pref_torbox_library");
+        if (torboxLib != null) {
+            torboxLib.setOnPreferenceClickListener(p -> {
+                if (!prefs.hasTorBoxKey()) {
+                    Toast.makeText(requireContext(),
+                            "Set your TorBox API key first", Toast.LENGTH_LONG).show();
+                } else {
+                    startActivity(new Intent(requireContext(),
+                            com.vikas.torrentplayer.ui.torbox.TorBoxLibraryActivity.class));
+                }
+                return true;
+            });
+        }
+
         Preference version = findPreference("pref_version");
         if (version != null) {
             version.setSummary(BuildConfig.VERSION_NAME);
@@ -276,6 +296,38 @@ public class SettingsFragment extends PreferenceFragmentCompat
                 .setPositiveButton(R.string.dialog_save, (d, w) -> {
                     prefs.setApiKey(input.getText().toString());
                     refreshApiKeySummary();
+                })
+                .show();
+    }
+
+    private void refreshTorBoxSummary(Preference p) {
+        String k = prefs.getTorBoxKey();
+        if (k == null || k.isEmpty()) {
+            p.setSummary("Not set — tap to add for full-speed downloads & streaming");
+        } else {
+            p.setSummary(k.length() <= 8 ? "••••••••"
+                    : k.substring(0, 4) + "•••••" + k.substring(k.length() - 4));
+        }
+    }
+
+    private void showTorBoxKeyDialog(Preference pref) {
+        EditText input = new EditText(requireContext());
+        input.setHint("TorBox API key");
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        input.setSingleLine();
+        input.setText(prefs.getTorBoxKey());
+        FrameLayout container = new FrameLayout(requireContext());
+        int pad = dp(24);
+        container.setPadding(pad, dp(8), pad, 0);
+        container.addView(input);
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle("TorBox API key")
+                .setMessage("Find it at torbox.app → Settings → API.")
+                .setView(container)
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .setPositiveButton(R.string.dialog_save, (d, w) -> {
+                    prefs.setTorBoxKey(input.getText().toString());
+                    refreshTorBoxSummary(pref);
                 })
                 .show();
     }

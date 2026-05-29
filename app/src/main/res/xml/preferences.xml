@@ -10,6 +10,19 @@
             android:icon="@drawable/rounded_settings_24" />
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="TorBox">
+        <Preference
+            android:key="pref_torbox_key"
+            android:title="TorBox API key"
+            android:summary="Full-speed downloads &amp; streaming via your TorBox account"
+            android:icon="@drawable/rounded_settings_24" />
+        <Preference
+            android:key="pref_torbox_library"
+            android:title="TorBox library"
+            android:summary="Browse, stream, download or delete torrents in your account"
+            android:icon="@drawable/rounded_download_24" />
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="@string/pref_cat_storage">
         <Preference
             android:key="pref_save_dir"

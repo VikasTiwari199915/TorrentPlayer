@@ -45,10 +45,36 @@ import java.util.Locale;
 public class PlayerActivity extends AppCompatActivity {
 
     private static final String EXTRA_INFO_HASH = "extra_info_hash";
+    private static final String EXTRA_FILE = "extra_file";
+    private static final String EXTRA_URL = "extra_url";
+    private static final String EXTRA_GROW_FILE = "extra_grow_file";
+    private static final String EXTRA_GROW_SIZE = "extra_grow_size";
 
     public static void start(Context ctx, String infoHash) {
         Intent i = new Intent(ctx, PlayerActivity.class);
         i.putExtra(EXTRA_INFO_HASH, infoHash);
+        ctx.startActivity(i);
+    }
+
+    /** Play a finished local file directly (e.g. a TorBox download). */
+    public static void startFile(Context ctx, String absPath) {
+        Intent i = new Intent(ctx, PlayerActivity.class);
+        i.putExtra(EXTRA_FILE, absPath);
+        ctx.startActivity(i);
+    }
+
+    /** Stream a remote HTTPS URL directly (e.g. a cached TorBox file). */
+    public static void startUrl(Context ctx, String url) {
+        Intent i = new Intent(ctx, PlayerActivity.class);
+        i.putExtra(EXTRA_URL, url);
+        ctx.startActivity(i);
+    }
+
+    /** Play a still-downloading local file (grows sequentially; best for MKV). */
+    public static void startGrowingFile(Context ctx, String absPath, long totalSize) {
+        Intent i = new Intent(ctx, PlayerActivity.class);
+        i.putExtra(EXTRA_GROW_FILE, absPath);
+        i.putExtra(EXTRA_GROW_SIZE, totalSize);
         ctx.startActivity(i);
     }
 
@@ -71,6 +97,29 @@ public class PlayerActivity extends AppCompatActivity {
         insets.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
         insets.hide(WindowInsetsCompat.Type.systemBars());
 
+        // Direct playback (TorBox): local file, remote URL, or growing file.
+        String filePath = getIntent().getStringExtra(EXTRA_FILE);
+        String streamUrl = getIntent().getStringExtra(EXTRA_URL);
+        String growFile = getIntent().getStringExtra(EXTRA_GROW_FILE);
+        if (filePath != null || streamUrl != null || growFile != null) {
+            try {
+                if (growFile != null) {
+                    playGrowing(new File(growFile), getIntent().getLongExtra(EXTRA_GROW_SIZE, 0));
+                } else if (filePath != null) {
+                    playUri(Uri.fromFile(new File(filePath)), null);
+                } else {
+                    playUri(Uri.parse(streamUrl), null);
+                }
+            } catch (Throwable ex) {
+                android.widget.Toast.makeText(this,
+                        "Player error: " + (ex.getMessage() != null ? ex.getMessage()
+                                : ex.getClass().getSimpleName()),
+                        android.widget.Toast.LENGTH_LONG).show();
+                finish();
+            }
+            return;
+        }
+
         String hash = getIntent().getStringExtra(EXTRA_INFO_HASH);
         handle = TorrentManager.get().findByHash(hash);
         if (handle == null) {
@@ -84,6 +133,31 @@ public class PlayerActivity extends AppCompatActivity {
         b.btnOpenExternal.setOnClickListener(v -> {
             if (handle != null) MagnetUtils.openMagnet(this, handle.magnetUrl);
         });
+    }
+
+    /** Build a plain player for a directly-readable URI (local file or HTTP). */
+    private void playUri(Uri uri, @Nullable DefaultMediaSourceFactory msf) {
+        ExoPlayer.Builder builder = new ExoPlayer.Builder(this);
+        if (msf != null) builder.setMediaSourceFactory(msf);
+        player = builder.build();
+        b.playerView.setPlayer(player);
+        player.setTrackSelectionParameters(
+                player.getTrackSelectionParameters().buildUpon()
+                        .setPreferredTextLanguage(Locale.getDefault().getLanguage())
+                        .build());
+        player.setMediaItem(MediaItem.fromUri(uri));
+        player.setPlayWhenReady(true);
+        player.prepare();
+        player.play();
+        playbackStarted = true;
+        b.loadingOverlay.setVisibility(View.GONE);
+    }
+
+    private void playGrowing(File file, long totalSize) {
+        DefaultMediaSourceFactory msf = new DefaultMediaSourceFactory(this)
+                .setDataSourceFactory(
+                        new com.vikas.torrentplayer.torbox.GrowingFileDataSource.Factory(file, totalSize));
+        playUri(Uri.fromFile(file), msf);
     }
 
     private void setupPlayer() {
