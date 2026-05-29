@@ -11,7 +11,11 @@ import android.widget.TextView;
 import androidx.annotation.Nullable;
 import androidx.annotation.OptIn;
 import androidx.fragment.app.FragmentActivity;
+import androidx.media3.common.C;
+import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
+import androidx.media3.common.Player;
+import androidx.media3.common.Tracks;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
@@ -151,6 +155,7 @@ public class TvPlayerActivity extends FragmentActivity {
         }
         player = b.build();
         playerView.setPlayer(player);
+        attachAudioDiagnostics();
         player.setPlayWhenReady(true);
         // Surface embedded MKV subtitles (and any side-loaded SRT/VTT) to the
         // PlayerView's subtitle button.
@@ -203,9 +208,50 @@ public class TvPlayerActivity extends FragmentActivity {
     }
 
     /** Plain ExoPlayer playback of any directly-readable URI (local or HTTP). */
+    /**
+     * Surfaces why audio might be silent: inspects the resolved tracks and, if
+     * the file has audio but no track the device can decode, toasts the codec
+     * (e.g. "audio/eac3"). Always logs the full audio track list to "TvPlayer".
+     */
+    private void attachAudioDiagnostics() {
+        if (player == null) return;
+        player.addListener(new Player.Listener() {
+            private boolean reported;
+            @Override public void onTracksChanged(@androidx.annotation.NonNull Tracks tracks) {
+                if (reported) return;
+                int audioGroups = 0, supported = 0;
+                String firstCodec = null;
+                StringBuilder log = new StringBuilder("audio tracks:");
+                for (Tracks.Group g : tracks.getGroups()) {
+                    if (g.getType() != C.TRACK_TYPE_AUDIO) continue;
+                    for (int i = 0; i < g.length; i++) {
+                        audioGroups++;
+                        Format f = g.getTrackFormat(i);
+                        boolean ok = g.isTrackSupported(i);
+                        if (ok) supported++;
+                        if (firstCodec == null) firstCodec = f.sampleMimeType;
+                        log.append("\n  ").append(f.sampleMimeType)
+                                .append(" ch=").append(f.channelCount)
+                                .append(" supported=").append(ok)
+                                .append(" selected=").append(g.isTrackSelected(i));
+                    }
+                }
+                android.util.Log.i("TvPlayer", log.toString());
+                if (audioGroups > 0 && supported == 0) {
+                    reported = true;
+                    android.widget.Toast.makeText(TvPlayerActivity.this,
+                            "No audio: this device can't decode " + firstCodec
+                                    + " (try a different release, or enable FFmpeg audio)",
+                            android.widget.Toast.LENGTH_LONG).show();
+                }
+            }
+        });
+    }
+
     private void playDirectUri(Uri uri) {
         player = new ExoPlayer.Builder(this, renderersFactory()).build();
         playerView.setPlayer(player);
+        attachAudioDiagnostics();
         player.setTrackSelectionParameters(
                 player.getTrackSelectionParameters().buildUpon()
                         .setPreferredTextLanguage(java.util.Locale.getDefault().getLanguage())
