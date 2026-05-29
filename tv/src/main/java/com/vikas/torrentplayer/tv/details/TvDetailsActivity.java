@@ -17,6 +17,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.bumptech.glide.Glide;
+import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions;
 import com.vikas.torrentplayer.api.ApiClient;
 import com.vikas.torrentplayer.api.TorrentClawApi;
 import com.vikas.torrentplayer.api.models.DiscoverItem;
@@ -50,12 +51,14 @@ public class TvDetailsActivity extends FragmentActivity {
         ctx.startActivity(i);
     }
 
-    private ImageView backdrop;
+    private ImageView poster, backdrop;
+    private View scrim;
     private TextView title, meta, overview, empty;
     private RecyclerView torrentsList;
 
     private DiscoverItem item;
     private SearchResult result;
+    private boolean backdropEnabled;
 
     private final TorrentClawApi api = ApiClient.get();
 
@@ -64,13 +67,17 @@ public class TvDetailsActivity extends FragmentActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_tv_details);
 
+        poster = findViewById(R.id.poster);
         backdrop = findViewById(R.id.backdrop);
+        scrim = findViewById(R.id.scrim);
         title = findViewById(R.id.title);
         meta = findViewById(R.id.meta);
         overview = findViewById(R.id.overview);
         empty = findViewById(R.id.empty);
         torrentsList = findViewById(R.id.torrents);
         torrentsList.setLayoutManager(new LinearLayoutManager(this));
+
+        backdropEnabled = new PrefsManager(this).isTvBackdropEnabled();
 
         item = (DiscoverItem) getIntent().getSerializableExtra(EXTRA_ITEM);
         if (item == null) { finish(); return; }
@@ -91,8 +98,28 @@ public class TvDetailsActivity extends FragmentActivity {
         if (rating != null) m.append(" · ").append(rating).append("★");
         meta.setText(m.toString());
         overview.setText(d.overview != null ? d.overview : "");
-        String img = d.backdropUrl != null ? d.backdropUrl : d.effectivePoster();
-        Glide.with(this).load(img).into(backdrop);
+
+        Glide.with(this).load(d.effectivePoster())
+                .override(280, 420).into(poster);
+        loadBackdrop(d.backdropUrl);
+    }
+
+    /** Loads the full-screen backdrop when enabled and a URL is present;
+     *  otherwise leaves the plain dark background. Bitmap is capped to 1280×720
+     *  to keep memory low on weak TV boxes. */
+    private void loadBackdrop(@Nullable String url) {
+        if (!backdropEnabled || url == null || url.isEmpty()) {
+            backdrop.setVisibility(View.GONE);
+            scrim.setVisibility(View.GONE);
+            return;
+        }
+        backdrop.setVisibility(View.VISIBLE);
+        scrim.setVisibility(View.VISIBLE);
+        Glide.with(this).load(url)
+                .override(1280, 720)
+                .centerCrop()
+                .transition(DrawableTransitionOptions.withCrossFade(400))
+                .into(backdrop);
     }
 
     /** Like the phone DetailViewModel: hit /search to find torrents. */
@@ -126,6 +153,13 @@ public class TvDetailsActivity extends FragmentActivity {
                     return;
                 }
                 result = best;
+                // The search result often has richer art than the discover card —
+                // upgrade the backdrop / poster if the initial one was missing.
+                if (item == null || item.backdropUrl == null) loadBackdrop(best.backdropUrl);
+                if ((item == null || item.effectivePoster() == null) && best.posterUrl != null) {
+                    Glide.with(TvDetailsActivity.this).load(best.posterUrl)
+                            .override(280, 420).into(poster);
+                }
                 List<TorrentItem> items = new ArrayList<>(best.torrents);
                 Collections.sort(items, new Comparator<TorrentItem>() {
                     @Override public int compare(TorrentItem a, TorrentItem b) {

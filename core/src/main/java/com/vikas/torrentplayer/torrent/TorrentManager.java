@@ -991,102 +991,119 @@ public class TorrentManager {
                 });
     }
 
-    @MainThread
+    /**
+     * Parses the .torrent and hands it to libtorrent. The parse
+     * ({@code new TorrentInfo}) and {@code session.download()} are JNI calls
+     * that can take seconds on a big multi-file torrent, so the whole body runs
+     * on the {@link #io} executor — running it on the main thread froze the UI
+     * and triggered ANRs when a download started. Only the LiveData / in-memory
+     * map mutations are posted back to the main thread.
+     */
     private void addToSession(@NonNull File torrentFile, @NonNull TorrentItem item,
                               @NonNull DownloadHandle handle, boolean addPaused,
                               @Nullable DownloadHandle.State targetState) {
-        try {
-            byte[] data = readBytes(torrentFile);
-            TorrentInfo ti = new TorrentInfo(data);
-            if (!ti.isValid()) throw new IllegalStateException("TorrentInfo is invalid");
+        io.execute(() -> {
+            try {
+                byte[] data = readBytes(torrentFile);
+                final TorrentInfo ti = new TorrentInfo(data);
+                if (!ti.isValid()) throw new IllegalStateException("TorrentInfo is invalid");
 
-            FileStorage files = ti.files();
-            List<Integer> videoIndices = findAllVideoFiles(files);
-            // Keep one "primary" video file for the player — largest by size
-            // among the video files, falls back to the largest file overall
-            // when no extension matched.
-            int videoIdx = videoIndices.isEmpty()
-                    ? findVideoFile(files)
-                    : largestOf(files, videoIndices);
-            List<Integer> subtitleIndices = findSubtitleFiles(files);
+                final FileStorage files = ti.files();
+                List<Integer> videoIndices = findAllVideoFiles(files);
+                // Keep one "primary" video file for the player — largest by size
+                // among the video files, falls back to the largest file overall
+                // when no extension matched.
+                final int videoIdx = videoIndices.isEmpty()
+                        ? findVideoFile(files)
+                        : largestOf(files, videoIndices);
+                final List<Integer> subtitleIndices = findSubtitleFiles(files);
 
-            Priority[] priorities = new Priority[files.numFiles()];
-            for (int i = 0; i < priorities.length; i++) {
-                boolean isVideo = videoIndices.contains(i);
-                boolean isSub = subtitleIndices.contains(i);
-                // Multi-file torrents (e.g. full season packs): include every
-                // recognised video and subtitle; skip .nfo, .txt, .exe, .zip,
-                // sample dirs, .url shortcuts, etc.
-                boolean wanted = isVideo || isSub
-                        // Single-file torrents whose only file didn't match a
-                        // video extension — still download it (could be a
-                        // weird container like .ogm).
-                        || (videoIndices.isEmpty() && i == videoIdx);
-                priorities[i] = wanted ? Priority.DEFAULT : Priority.IGNORE;
-            }
-
-            DownloadHandle.State finalState = targetState != null
-                    ? targetState
-                    : (addPaused ? DownloadHandle.State.PAUSED : DownloadHandle.State.BUFFERING);
-
-            TorrentHandle existing = session.find(ti.infoHash());
-            if (existing != null && existing.isValid()) {
-                if (addPaused) {
-                    try { existing.unsetFlags(TorrentFlags.AUTO_MANAGED); } catch (Throwable ignored) {}
-                    existing.pause();
-                } else {
-                    existing.resume();
+                Priority[] priorities = new Priority[files.numFiles()];
+                for (int i = 0; i < priorities.length; i++) {
+                    boolean isVideo = videoIndices.contains(i);
+                    boolean isSub = subtitleIndices.contains(i);
+                    // Multi-file torrents (e.g. full season packs): include every
+                    // recognised video and subtitle; skip .nfo, .txt, .exe, .zip,
+                    // sample dirs, .url shortcuts, etc.
+                    boolean wanted = isVideo || isSub
+                            // Single-file torrents whose only file didn't match a
+                            // video extension — still download it (could be a
+                            // weird container like .ogm).
+                            || (videoIndices.isEmpty() && i == videoIdx);
+                    priorities[i] = wanted ? Priority.DEFAULT : Priority.IGNORE;
                 }
-                bindRecord(handle, ti, files, videoIdx, subtitleIndices);
-                if (!addPaused) prioritiseTailPieces(existing, records.get(handle.infoHash));
-                handle.state.setValue(finalState);
-                persistAsync(handle);
-                return;
+
+                final DownloadHandle.State finalState = targetState != null
+                        ? targetState
+                        : (addPaused ? DownloadHandle.State.PAUSED : DownloadHandle.State.BUFFERING);
+
+                TorrentHandle existing = session.find(ti.infoHash());
+                if (existing != null && existing.isValid()) {
+                    if (addPaused) {
+                        try { existing.unsetFlags(TorrentFlags.AUTO_MANAGED); } catch (Throwable ignored) {}
+                        existing.pause();
+                    } else {
+                        existing.resume();
+                    }
+                    final TorrentHandle fe = existing;
+                    main.post(() -> {
+                        bindRecord(handle, ti, files, videoIdx, subtitleIndices);
+                        if (!addPaused) prioritiseTailPieces(fe, records.get(handle.infoHash));
+                        handle.state.setValue(finalState);
+                        persistAsync(handle);
+                    });
+                    return;
+                }
+
+                // SEQUENTIAL_DOWNLOAD lets head pieces stream first; PAUSED ensures
+                // restored-paused torrents don't auto-start when re-added.
+                torrent_flags_t flags = TorrentFlags.SEQUENTIAL_DOWNLOAD;
+                if (addPaused) {
+                    try { flags = flags.or_(TorrentFlags.PAUSED); }
+                    catch (Throwable ignored) {}
+                }
+
+                // Fast-resume support: if we ever managed to save a .resume blob
+                // for this hash, hand it to libtorrent so it can skip re-hashing
+                // every piece on startup.
+                File resumeFile = new File(torrentFileCacheDir, item.infoHash + ".resume");
+                File resumeArg = (resumeFile.exists() && resumeFile.length() > 0) ? resumeFile : null;
+
+                session.download(ti, saveDir, resumeArg, priorities, null, flags);
+                TorrentHandle th = session.find(ti.infoHash());
+                if (th == null || !th.isValid()) {
+                    throw new IllegalStateException("session.find() returned null after download()");
+                }
+
+                // Force-pin paused state — clear AUTO_MANAGED so the session queue
+                // doesn't silently resume it again moments later.
+                if (addPaused) {
+                    try { th.unsetFlags(TorrentFlags.AUTO_MANAGED); }
+                    catch (Throwable ex) { Log.w(TAG, "unsetFlags failed", ex); }
+                }
+
+                final TorrentHandle fth = th;
+                final boolean hadResume = resumeArg != null;
+                main.post(() -> {
+                    bindRecord(handle, ti, files, videoIdx, subtitleIndices);
+                    if (!addPaused) prioritiseTailPieces(fth, records.get(handle.infoHash));
+                    handle.state.setValue(finalState);
+                    persistAsync(handle);
+                    Log.i(TAG, "added torrent \"" + ti.name() + "\" videoFile="
+                            + (videoIdx >= 0 ? files.filePath(videoIdx) : "<none>")
+                            + " subs=" + subtitleIndices.size()
+                            + " paused=" + addPaused
+                            + " resume=" + hadResume);
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "addToSession failed", e);
+                main.post(() -> {
+                    handle.state.setValue(DownloadHandle.State.ERROR);
+                    handle.errorMessage.setValue(e.getMessage());
+                    persistAsync(handle);
+                });
             }
-
-            // SEQUENTIAL_DOWNLOAD lets head pieces stream first; PAUSED ensures
-            // restored-paused torrents don't auto-start when re-added.
-            torrent_flags_t flags = TorrentFlags.SEQUENTIAL_DOWNLOAD;
-            if (addPaused) {
-                try { flags = flags.or_(TorrentFlags.PAUSED); }
-                catch (Throwable ignored) {}
-            }
-
-            // Fast-resume support: if we ever managed to save a .resume blob
-            // for this hash, hand it to libtorrent so it can skip re-hashing
-            // every piece on startup.
-            File resumeFile = new File(torrentFileCacheDir, item.infoHash + ".resume");
-            File resumeArg = (resumeFile.exists() && resumeFile.length() > 0) ? resumeFile : null;
-
-            session.download(ti, saveDir, resumeArg, priorities, null, flags);
-            TorrentHandle th = session.find(ti.infoHash());
-            if (th == null || !th.isValid()) {
-                throw new IllegalStateException("session.find() returned null after download()");
-            }
-
-            // Force-pin paused state — clear AUTO_MANAGED so the session queue
-            // doesn't silently resume it again moments later.
-            if (addPaused) {
-                try { th.unsetFlags(TorrentFlags.AUTO_MANAGED); }
-                catch (Throwable ex) { Log.w(TAG, "unsetFlags failed", ex); }
-            }
-
-            bindRecord(handle, ti, files, videoIdx, subtitleIndices);
-            if (!addPaused) prioritiseTailPieces(th, records.get(handle.infoHash));
-            handle.state.setValue(finalState);
-            persistAsync(handle);
-
-            Log.i(TAG, "added torrent \"" + ti.name() + "\" videoFile="
-                    + (videoIdx >= 0 ? files.filePath(videoIdx) : "<none>")
-                    + " subs=" + subtitleIndices.size()
-                    + " paused=" + addPaused
-                    + " resume=" + (resumeArg != null));
-        } catch (Exception e) {
-            Log.e(TAG, "addToSession failed", e);
-            handle.state.setValue(DownloadHandle.State.ERROR);
-            handle.errorMessage.setValue(e.getMessage());
-            persistAsync(handle);
-        }
+        });
     }
 
     private void bindRecord(DownloadHandle handle, TorrentInfo ti, FileStorage files, int videoIdx,

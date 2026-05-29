@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Darkens the right (text) side of the backdrop so titles/overview stay
+     readable, while the left (poster) side shows more of the image. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:type="linear"
+        android:angle="0"
+        android:startColor="#4D0F0820"
+        android:centerColor="#B30F0820"
+        android:endColor="#F20F0820" />
+</shape>

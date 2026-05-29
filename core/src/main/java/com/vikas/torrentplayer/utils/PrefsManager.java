@@ -21,6 +21,7 @@ public final class PrefsManager {
     public static final String KEY_DELETE_ON_REMOVE = "pref_delete_on_remove";
     public static final String KEY_AUTO_RESUME = "pref_auto_resume";
     public static final String KEY_SAVE_VOLUME_PATH = "pref_save_volume_path";
+    public static final String KEY_TV_BACKDROP = "pref_tv_backdrop";
 
     private final SharedPreferences sp;
 
@@ -72,5 +73,15 @@ public final class PrefsManager {
     public void setSaveVolumePath(String path) {
         if (path == null) sp.edit().remove(KEY_SAVE_VOLUME_PATH).apply();
         else sp.edit().putString(KEY_SAVE_VOLUME_PATH, path).apply();
+    }
+
+    /** Show full-screen backdrop art on the TV details screen. Default ON;
+     *  can be turned off on weak boxes where the large image hurts performance. */
+    public boolean isTvBackdropEnabled() {
+        return sp.getBoolean(KEY_TV_BACKDROP, true);
+    }
+
+    public void setTvBackdropEnabled(boolean enabled) {
+        sp.edit().putBoolean(KEY_TV_BACKDROP, enabled).apply();
     }
 }

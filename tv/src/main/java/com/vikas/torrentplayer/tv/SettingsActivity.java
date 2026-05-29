@@ -39,8 +39,9 @@ public class SettingsActivity extends FragmentActivity {
     private static final int ITEM_SAVE_DIR = 1;
     private static final int ITEM_STORAGE_ACCESS = 2;
     private static final int ITEM_DIAGNOSTICS = 3;
-    private static final int ITEM_CLEAR_CACHE = 4;
-    private static final int ITEM_CHECK_UPDATES = 5;
+    private static final int ITEM_BACKDROP = 4;
+    private static final int ITEM_CLEAR_CACHE = 5;
+    private static final int ITEM_CHECK_UPDATES = 6;
 
     private PrefsManager prefs;
     private RowsAdapter adapter;
@@ -263,7 +264,7 @@ public class SettingsActivity extends FragmentActivity {
     private class RowsAdapter extends RecyclerView.Adapter<RowsAdapter.VH> {
         private final List<Integer> rows = Arrays.asList(
                 ITEM_API_KEY, ITEM_SAVE_DIR, ITEM_STORAGE_ACCESS,
-                ITEM_DIAGNOSTICS, ITEM_CLEAR_CACHE, ITEM_CHECK_UPDATES);
+                ITEM_DIAGNOSTICS, ITEM_BACKDROP, ITEM_CLEAR_CACHE, ITEM_CHECK_UPDATES);
 
         @NonNull @Override
         public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
@@ -317,6 +318,16 @@ public class SettingsActivity extends FragmentActivity {
                     t1.setText("Storage diagnostics");
                     t2.setText("Show what the system reports about drives");
                     h.itemView.setOnClickListener(v -> showDiagnostics());
+                    break;
+                case ITEM_BACKDROP:
+                    t1.setText("Show backdrop art");
+                    t2.setText(prefs.isTvBackdropEnabled()
+                            ? "On — full-screen art on the details screen"
+                            : "Off — plain background (lighter on weak boxes)");
+                    h.itemView.setOnClickListener(v -> {
+                        prefs.setTvBackdropEnabled(!prefs.isTvBackdropEnabled());
+                        notifyDataSetChanged();
+                    });
                     break;
                 case ITEM_CLEAR_CACHE:
                     t1.setText("Clear downloads & cache");
