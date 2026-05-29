@@ -278,6 +278,7 @@ public class TvDownloadsActivity extends FragmentActivity {
             switch (d.state) {
                 case DOWNLOADING: meta = "Downloading · " + d.percent + "%  ·  "
                         + FormatUtils.humanSpeed(d.speed); break;
+                case PAUSED:      meta = "Paused · " + d.percent + "%"; break;
                 case DONE:        meta = "Done · tap to play"; break;
                 case ERROR:       meta = "Error: " + (d.error != null ? d.error : "failed"); break;
                 default:          meta = ""; break;
@@ -329,12 +330,20 @@ public class TvDownloadsActivity extends FragmentActivity {
         if (d.state == TorBoxManager.State.DONE && d.file != null) {
             labels.add("Play");
             actions.add(() -> TvPlayerActivity.startFile(this, d.file.getAbsolutePath(), d.title));
-        } else if (d.state == TorBoxManager.State.DOWNLOADING
+        } else if ((d.state == TorBoxManager.State.DOWNLOADING
+                || d.state == TorBoxManager.State.PAUSED)
                 && d.file != null && d.file.exists()) {
             // Partial playback — best-effort, works for progressive MKV.
             labels.add("Play now (still downloading)");
             actions.add(() -> TvPlayerActivity.startGrowingFile(
                     this, d.file.getAbsolutePath(), d.size, d.title));
+        }
+        if (d.state == TorBoxManager.State.DOWNLOADING) {
+            labels.add("Pause");
+            actions.add(() -> TorBoxManager.get().pause(d.key));
+        } else if (d.state == TorBoxManager.State.PAUSED) {
+            labels.add("Resume");
+            actions.add(() -> TorBoxManager.get().resume(d.key));
         }
         labels.add("Remove from list");
         actions.add(() -> {

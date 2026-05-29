@@ -91,6 +91,10 @@ public final class TorBoxManager {
             boolean fileOk = d.file != null && d.file.exists() && d.file.length() > 0;
             if (saved == State.DONE && fileOk) {
                 d.state = State.DONE;
+            } else if (saved == State.PAUSED) {
+                // Stay paused; the user resumes manually.
+                d.state = State.PAUSED;
+                d.pauseRequested.set(true);
             } else if (fileOk || saved == State.DOWNLOADING) {
                 // Interrupted mid-download — resume in the background.
                 d.state = State.DOWNLOADING;
@@ -151,7 +155,7 @@ public final class TorBoxManager {
     // Local download tracking
     // ------------------------------------------------------------------
 
-    public enum State { DOWNLOADING, DONE, ERROR }
+    public enum State { DOWNLOADING, PAUSED, DONE, ERROR }
 
     public static final class Download {
         public final String key;
@@ -165,7 +169,9 @@ public final class TorBoxManager {
         public long speed;
         public File file;
         public String error;
-        final AtomicBoolean cancelled = new AtomicBoolean(false);
+        final AtomicBoolean cancelled = new AtomicBoolean(false);    // remove: stop + delete
+        final AtomicBoolean pauseRequested = new AtomicBoolean(false); // pause: stop + keep file
+        boolean shouldStop() { return cancelled.get() || pauseRequested.get(); }
         Download(String key, String title) { this.key = key; this.title = title; }
     }
 
@@ -279,6 +285,28 @@ public final class TorBoxManager {
     }
 
     @MainThread
+    public void pause(String key) {
+        Download d = items.get(key);
+        if (d == null || d.state != State.DOWNLOADING) return;
+        d.pauseRequested.set(true);    // worker stops at the next chunk, keeps the file
+        d.state = State.PAUSED;
+        d.speed = 0;
+        publish();
+        persist(d);
+    }
+
+    @MainThread
+    public void resume(String key) {
+        Download d = items.get(key);
+        if (d == null || d.state != State.PAUSED) return;
+        d.pauseRequested.set(false);
+        d.state = State.DOWNLOADING;
+        publish();
+        persist(d);
+        io.execute(() -> runFileDownload(d));   // resumes via HTTP Range
+    }
+
+    @MainThread
     public void remove(String key) {
         Download d = items.remove(key);
         if (d != null) d.cancelled.set(true);
@@ -302,6 +330,7 @@ public final class TorBoxManager {
                 out.delete();
                 return;
             }
+            if (d.pauseRequested.get()) return;   // paused: keep partial file, state already PAUSED
             update(d, State.DONE, 100, 0);
             notifyMediaScanner(out);
             Log.i(TAG, "TorBox download complete: " + out.getAbsolutePath());
@@ -337,7 +366,7 @@ public final class TorBoxManager {
                 if (append) raf.seek(existing); else raf.setLength(0);
                 int n;
                 while ((n = in.read(buf)) != -1) {
-                    if (d.cancelled.get()) return;
+                    if (d.shouldStop()) return;   // pause (keep file) or remove (deleted by caller)
                     raf.write(buf, 0, n);
                     done += n;
                     long now = System.currentTimeMillis();
@@ -384,6 +413,8 @@ public final class TorBoxManager {
 
     private void update(Download d, State state, int percent, long speed) {
         main.post(() -> {
+            // A late progress tick must not clobber a pause the user just made.
+            if (state == State.DOWNLOADING && d.pauseRequested.get()) return;
             boolean stateChanged = d.state != state;
             d.state = state; d.percent = percent; d.speed = speed;
             publish();
