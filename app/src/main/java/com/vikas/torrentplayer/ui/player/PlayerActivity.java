@@ -116,6 +116,15 @@ public class PlayerActivity extends AppCompatActivity {
         player = builder.build();
         b.playerView.setPlayer(player);
         player.setPlayWhenReady(true);
+        // Make the built-in subtitle button actually do something — when the
+        // player discovers text tracks (embedded MKV subs or side-loaded SRT)
+        // pick the user's preferred language; otherwise the button stays
+        // disabled.
+        player.setTrackSelectionParameters(
+                player.getTrackSelectionParameters()
+                        .buildUpon()
+                        .setPreferredTextLanguage(java.util.Locale.getDefault().getLanguage())
+                        .build());
     }
 
     private void observeHandle() {

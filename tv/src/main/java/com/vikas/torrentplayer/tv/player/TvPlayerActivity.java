@@ -102,6 +102,13 @@ public class TvPlayerActivity extends FragmentActivity {
         player = b.build();
         playerView.setPlayer(player);
         player.setPlayWhenReady(true);
+        // Surface embedded MKV subtitles (and any side-loaded SRT/VTT) to the
+        // PlayerView's subtitle button.
+        player.setTrackSelectionParameters(
+                player.getTrackSelectionParameters()
+                        .buildUpon()
+                        .setPreferredTextLanguage(java.util.Locale.getDefault().getLanguage())
+                        .build());
     }
 
     private void observeHandle() {

@@ -14,6 +14,7 @@
         android:layout_height="match_parent"
         app:resize_mode="fit"
         app:show_buffering="when_playing"
+        app:show_subtitle_button="true"
         app:use_controller="true" />
 
     <LinearLayout

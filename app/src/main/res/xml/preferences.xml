@@ -42,6 +42,12 @@
             android:title="@string/pref_remove_files_title"
             android:summary="@string/pref_remove_files_summary"
             android:defaultValue="true" />
+
+        <SwitchPreferenceCompat
+            android:key="pref_auto_resume"
+            android:title="@string/pref_auto_resume_title"
+            android:summary="@string/pref_auto_resume_summary"
+            android:defaultValue="false" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="@string/pref_cat_about">

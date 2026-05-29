@@ -222,18 +222,34 @@ public class TorrentManager {
     }
 
     /**
-     * Scoped-storage compliant save location. We use {@code getExternalMediaDirs()[0]}
-     * — that path lives at {@code /sdcard/Android/media/<pkg>/} and (a) requires
-     * no permission, (b) is automatically picked up by the MediaScanner, so
-     * downloaded videos appear in the gallery / other media players. Falls
-     * back to plain external-files if media dirs aren't available.
+     * Pick the writable volume with the most free space.
+     *
+     * <p>{@code getExternalMediaDirs()} returns one path per mounted volume:
+     * index 0 is internal storage, subsequent indices are SD card / USB
+     * drive / etc. — exactly the case the user's TV box (6 GB internal +
+     * 64 GB external) hits.  By scanning {@link File#getUsableSpace()} we
+     * automatically prefer the volume that can actually hold a couple of
+     * full-length downloads without filling up.
+     *
+     * <p>No runtime permission required: these dirs are scoped-storage
+     * app-specific paths and the MediaScanner still picks up videos here.
      */
     private void chooseSaveDir() {
         File chosen = null;
+        long bestFree = -1;
+        StringBuilder report = new StringBuilder();
+
         File[] media = appContext.getExternalMediaDirs();
         if (media != null) {
             for (File d : media) {
-                if (d != null) { chosen = d; break; }
+                if (d == null) continue;
+                long free = d.getUsableSpace();
+                report.append("\n  ").append(d.getAbsolutePath())
+                        .append(" → ").append(free / (1024 * 1024)).append(" MB free");
+                if (free > bestFree) {
+                    chosen = d;
+                    bestFree = free;
+                }
             }
         }
         if (chosen == null) chosen = appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
@@ -243,6 +259,9 @@ public class TorrentManager {
         if (!saveDir.exists()) //noinspection ResultOfMethodCallIgnored
             saveDir.mkdirs();
         usingPublicDownloads = false;
+        Log.i(TAG, "chose save dir: " + saveDir.getAbsolutePath()
+                + " (" + (bestFree / (1024 * 1024)) + " MB free)"
+                + " — candidates:" + report);
     }
 
     /** Ask the system MediaScanner to index a freshly-finished file so gallery
@@ -530,21 +549,35 @@ public class TorrentManager {
                 publishList();
 
                 // Decide whether to restore as paused or as actively-downloading.
-                // PAUSED / FINISHED / ERROR are restored paused — libtorrent
-                // would otherwise auto-resume them moments after add.
+                // Default policy: NEVER auto-resume on launch (saves the user
+                // from a tight-storage TV silently filling itself up after
+                // restart). User can flip pref_auto_resume to opt back in.
+                final boolean autoResumeAllowed = prefs.isAutoResume();
+
                 DownloadHandle.State stateOnDisk =
                         (row.lastState >= 0 && row.lastState < states.length)
                                 ? states[row.lastState]
                                 : DownloadHandle.State.PAUSED;
-                boolean restorePaused =
-                        stateOnDisk == DownloadHandle.State.PAUSED
-                                || stateOnDisk == DownloadHandle.State.FINISHED
-                                || stateOnDisk == DownloadHandle.State.ERROR;
-                DownloadHandle.State targetState = stateOnDisk;
-                // Avoid stranding handles in transient states across restarts
-                if (targetState == DownloadHandle.State.STARTING
-                        || targetState == DownloadHandle.State.READY) {
-                    targetState = DownloadHandle.State.BUFFERING;
+
+                boolean restorePaused;
+                DownloadHandle.State targetState;
+                if (!autoResumeAllowed) {
+                    // Hard policy: anything that wasn't already in a terminal
+                    // state goes back as PAUSED. FINISHED stays FINISHED.
+                    restorePaused = true;
+                    targetState = stateOnDisk == DownloadHandle.State.FINISHED
+                            ? DownloadHandle.State.FINISHED
+                            : DownloadHandle.State.PAUSED;
+                } else {
+                    restorePaused =
+                            stateOnDisk == DownloadHandle.State.PAUSED
+                                    || stateOnDisk == DownloadHandle.State.FINISHED
+                                    || stateOnDisk == DownloadHandle.State.ERROR;
+                    targetState = stateOnDisk;
+                    if (targetState == DownloadHandle.State.STARTING
+                            || targetState == DownloadHandle.State.READY) {
+                        targetState = DownloadHandle.State.BUFFERING;
+                    }
                 }
 
                 // Try to re-add via cached .torrent file
