@@ -43,7 +43,7 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Building versionName=${VERSION}"
 
-      - name: Build Signed APKs (phone + TV)
+      - name: Build Signed APKs (Phone + TV)
         run: |
           ./gradlew :app:assembleRelease :tv:assembleRelease \
             -PversionName=${{ steps.version.outputs.version }} \

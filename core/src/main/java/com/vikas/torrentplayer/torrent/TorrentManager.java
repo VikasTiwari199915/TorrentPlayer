@@ -43,13 +43,17 @@ import org.libtorrent4j.alerts.TorrentErrorAlert;
 import org.libtorrent4j.alerts.TorrentFinishedAlert;
 import org.libtorrent4j.swig.torrent_flags_t;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -308,100 +312,153 @@ public class TorrentManager {
                 + " — candidates:" + report);
     }
 
+    /** Filesystems that only ever back a removable drive (USB stick / SD card).
+     *  These are never system partitions, so we trust them at any mount path. */
+    private static boolean isRemovableFsType(String fs) {
+        switch (fs.toLowerCase(Locale.US)) {
+            case "vfat": case "exfat": case "ntfs": case "fuseblk":
+            case "msdos": case "texfat": case "sdfat": case "iso9660": case "udf":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * Is this {@code /proc/mounts} entry a user-writable external drive?
+     *
+     * <p>Two ways to qualify: a removable-media filesystem type anywhere (USB
+     * sticks are always vfat/exfat/ntfs/…), or a fuse/sdcardfs mount exposed
+     * under {@code /storage/<id>} (the app-facing view of a volume).
+     */
+    private static boolean isExternalStorageMount(String mp, String fs) {
+        if (isRemovableFsType(fs)) return true;
+        String f = fs.toLowerCase(Locale.US);
+        if ((f.equals("fuse") || f.equals("sdcardfs")) && mp.startsWith("/storage/")
+                && !mp.startsWith("/storage/emulated") && !mp.startsWith("/storage/self")) {
+            return true;
+        }
+        return false;
+    }
+
     /**
      * Returns all volumes the user can choose as a save location, with space info.
      * Must be called after {@link #init}.
      *
-     * <p>Combines two sources:
-     * <ul>
-     *   <li>{@code getExternalMediaDirs()} — scoped app-specific dirs on internal
-     *       storage and adopted SD cards. Always writable, no permission.</li>
-     *   <li>{@code StorageManager.getStorageVolumes()} — catches <b>portable USB
-     *       drives / removable SD cards</b> that the media-dir API deliberately
-     *       hides. Writing there needs {@code MANAGE_EXTERNAL_STORAGE}; these
-     *       entries carry {@code isAppDir == false} so the UI can prompt.</li>
-     * </ul>
+     * <p>Three sources, in order of trust:
+     * <ol>
+     *   <li>{@code getExternalMediaDirs()} — scoped app dirs (internal / adopted),
+     *       always writable, no permission. {@code isAppDir == true}.</li>
+     *   <li>{@code StorageManager.getStorageVolumes()} — the official volume list.</li>
+     *   <li>{@code /proc/mounts} — the kernel's real mount table. This is what
+     *       finds portable USB drives on cheap TV boxes whose StorageManager
+     *       doesn't report them. We only trust mounts with a real filesystem
+     *       type, and (once we hold the permission) only ones a write-probe
+     *       actually succeeds on — that drops the empty {@code /mnt/*} stub
+     *       directories that otherwise all report the root-fs size.</li>
+     * </ol>
      */
-    /** Raw filesystem mount roots to probe for USB / SD drives that the official
-     *  storage APIs miss on cheap Android TV boxes. */
-    private static final String[] MOUNT_SCAN_ROOTS = {
-            "/storage", "/mnt/media_rw", "/mnt"
-    };
-    /** Children of the scan roots that are never user-selectable drives. */
-    private static final String[] MOUNT_SKIP_NAMES = {
-            "emulated", "self", "enc_emulated", "container", "knox-emulated",
-            "media_rw", "runtime", "sdcard", "asec", "obb", "secure",
-            "android_secure", "appfuse", "user", "shell", "data"
-    };
-
     public List<VolumeInfo> getAvailableVolumes() {
         List<VolumeInfo> result = new ArrayList<>();
         if (appContext == null) return result;
         StorageManager sm = (StorageManager) appContext.getSystemService(Context.STORAGE_SERVICE);
-        // Track every root we've already added so the three sources don't duplicate.
         List<String> addedRoots = new ArrayList<>();
+        boolean granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.R
+                || Environment.isExternalStorageManager();
 
         // 1. Scoped app-specific media dirs — always writable.
         File[] media = appContext.getExternalMediaDirs();
         if (media != null) {
             for (File d : media) {
                 if (d == null) continue;
-                String label = volumeLabel(sm, d, "Internal storage");
-                result.add(makeVolumeInfo(d, label, true));
+                result.add(makeVolumeInfo(d, volumeLabel(sm, d, "Internal storage"), true));
                 addedRoots.add(d.getAbsolutePath());
             }
         }
 
-        // 2. StorageManager volumes — picks up portable USB / removable SD that
-        //    the media-dir API skips. getDirectory() requires API 30.
+        // 2. StorageManager volumes (API 30+).
         if (sm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
                 for (StorageVolume sv : sm.getStorageVolumes()) {
                     if (!Environment.MEDIA_MOUNTED.equals(sv.getState())) continue;
                     File dir = sv.getDirectory();
-                    if (dir == null) continue;
-                    if (isCoveredBy(dir, addedRoots)) continue;
+                    if (dir == null || isCoveredBy(dir, addedRoots)) continue;
                     String label = sv.getDescription(appContext);
-                    if (label == null || label.isEmpty()) label = dir.getAbsolutePath();
+                    if (label == null || label.isEmpty()) label = dir.getName();
                     result.add(makeVolumeInfo(dir, label, false));
                     addedRoots.add(dir.getAbsolutePath());
                 }
             } catch (Throwable t) {
-                Log.w(TAG, "enumerating storage volumes failed", t);
+                Log.w(TAG, "getStorageVolumes failed", t);
             }
         }
 
-        // 3. Raw filesystem scan — last resort for boxes whose StorageManager
-        //    doesn't report the USB drive at all.
-        for (String rootPath : MOUNT_SCAN_ROOTS) {
-            File[] children = new File(rootPath).listFiles();
-            if (children == null) continue;
-            for (File child : children) {
-                if (child == null || !child.isDirectory()) continue;
-                if (isSkippedMount(child.getName())) continue;
-                if (isCoveredBy(child, addedRoots)) continue;
-                // Only offer mounts that look real (have some total space) OR are
-                // at least listable — pre-permission space reads return 0, so we
-                // keep them and let the UI flag "needs permission".
-                result.add(makeVolumeInfo(child, child.getName(), false));
-                addedRoots.add(child.getAbsolutePath());
-            }
+        // 3. /proc/mounts — the only reliable source for portable USB on TV boxes.
+        Set<String> sizeSigs = new LinkedHashSet<>();
+        for (File mp : readExternalMounts()) {
+            if (isCoveredBy(mp, addedRoots)) continue;
+            // With the permission held, hide mounts we can't actually write to —
+            // this drops root-only raw mounts and any leftover stub dirs.
+            if (granted && !canActuallyWrite(mp)) continue;
+            VolumeInfo vi = makeVolumeInfo(mp, mp.getName(), false);
+            // Collapse the same physical drive exposed at two writable paths
+            // (e.g. /storage/<id> and /mnt/usb/<id>) by capacity signature.
+            String sig = vi.total + ":" + vi.free;
+            if (vi.total > 0 && !sizeSigs.add(sig)) continue;
+            result.add(vi);
+            addedRoots.add(mp.getAbsolutePath());
         }
         return result;
+    }
+
+    /**
+     * Parses {@code /proc/mounts} for real external mounts. App-facing
+     * {@code /storage/<id>} entries are returned first so they're preferred over
+     * the root-only raw mount of the same drive.
+     */
+    private List<File> readExternalMounts() {
+        List<File> storageMounts = new ArrayList<>();
+        List<File> otherMounts = new ArrayList<>();
+        try (BufferedReader br = new BufferedReader(new FileReader("/proc/mounts"))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] p = line.split(" ");
+                if (p.length < 3) continue;
+                String mp = p[1].replace("\\040", " ");
+                if (!isExternalStorageMount(mp, p[2])) continue;
+                if (mp.startsWith("/storage/")) storageMounts.add(new File(mp));
+                else otherMounts.add(new File(mp));
+            }
+        } catch (IOException e) {
+            Log.w(TAG, "reading /proc/mounts failed", e);
+        }
+        List<File> out = new ArrayList<>(storageMounts);
+        out.addAll(otherMounts);
+        return out;
+    }
+
+    /** Create-then-delete a probe file to confirm we can really write here. */
+    private boolean canActuallyWrite(File dir) {
+        try {
+            if (dir == null || !dir.isDirectory()) return false;
+            File probe = new File(dir, ".tp_probe_" + System.nanoTime());
+            try (FileOutputStream fos = new FileOutputStream(probe)) {
+                fos.write('x');
+            }
+            boolean ok = probe.exists();
+            //noinspection ResultOfMethodCallIgnored
+            probe.delete();
+            return ok;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     private boolean isCoveredBy(File dir, List<String> addedRoots) {
         String p = dir.getAbsolutePath();
         for (String r : addedRoots) {
-            // Either the candidate sits under an added root, or an added media
-            // dir sits under the candidate (same physical volume).
             if (p.startsWith(r) || r.startsWith(p)) return true;
         }
-        return false;
-    }
-
-    private boolean isSkippedMount(String name) {
-        for (String s : MOUNT_SKIP_NAMES) if (s.equalsIgnoreCase(name)) return true;
         return false;
     }
 
@@ -443,26 +500,38 @@ public class TorrentManager {
             }
         }
 
-        sb.append("\n\n[Filesystem scan]");
-        for (String rootPath : MOUNT_SCAN_ROOTS) {
-            File root = new File(rootPath);
-            File[] children = root.listFiles();
-            sb.append("\n  ").append(rootPath).append(": ");
-            if (children == null) {
-                sb.append(root.exists() ? "(not listable)" : "(absent)");
-            } else if (children.length == 0) {
-                sb.append("(empty)");
-            } else {
-                for (File c : children) {
-                    sb.append("\n     ").append(c.getName())
-                            .append(c.isDirectory() ? "/" : "")
-                            .append(" r=").append(c.canRead())
-                            .append(" w=").append(c.canWrite());
-                    long total = 0;
-                    try { total = c.getTotalSpace(); } catch (Throwable ignored) {}
-                    if (total > 0) sb.append(" total=").append(total / (1024 * 1024)).append("MB");
-                }
+        sb.append("\n\n[/proc/mounts — storage & external]");
+        boolean anyMount = false;
+        try (BufferedReader br = new BufferedReader(new FileReader("/proc/mounts"))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] p = line.split(" ");
+                if (p.length < 3) continue;
+                String mp = p[1];
+                // Show anything mounted under /storage or /mnt plus any removable
+                // filesystem, so a USB at a nonstandard path is still visible here.
+                boolean show = mp.startsWith("/storage/") || mp.startsWith("/mnt/")
+                        || isRemovableFsType(p[2]);
+                if (!show) continue;
+                File f = new File(mp);
+                long total = 0;
+                try { total = f.getTotalSpace(); } catch (Throwable ignored) {}
+                sb.append("\n  ").append(mp).append(" [").append(p[2]).append("]")
+                        .append(" total=").append(total / (1024 * 1024)).append("MB")
+                        .append(" ext=").append(isExternalStorageMount(mp, p[2]))
+                        .append(" w=").append(canActuallyWrite(f));
+                anyMount = true;
             }
+        } catch (IOException e) {
+            sb.append("\n  error: ").append(e.getMessage());
+        }
+        if (!anyMount) sb.append("\n  (nothing under /storage or /mnt in our mount namespace)");
+
+        sb.append("\n\n[Detected save volumes]");
+        for (VolumeInfo v : getAvailableVolumes()) {
+            sb.append("\n  ").append(v.label).append(" → ").append(v.root.getAbsolutePath())
+                    .append(" (").append(v.free / (1024 * 1024)).append("/")
+                    .append(v.total / (1024 * 1024)).append(" MB) appDir=").append(v.isAppDir);
         }
         return sb.toString();
     }
