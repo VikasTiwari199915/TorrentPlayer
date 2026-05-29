@@ -13,9 +13,11 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.fragment.app.FragmentActivity;
+import androidx.recyclerview.widget.ConcatAdapter;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.vikas.torrentplayer.torbox.TorBoxManager;
 import com.vikas.torrentplayer.torrent.DownloadHandle;
 import com.vikas.torrentplayer.torrent.TorrentManager;
 import com.vikas.torrentplayer.tv.R;
@@ -33,6 +35,7 @@ import java.util.List;
 public class TvDownloadsActivity extends FragmentActivity {
 
     private DownloadsAdapter adapter;
+    private TorBoxAdapter torBoxAdapter;
     private TextView empty;
     private RecyclerView list;
 
@@ -45,6 +48,7 @@ public class TvDownloadsActivity extends FragmentActivity {
     private final Runnable liveTick = new Runnable() {
         @Override public void run() {
             adapter.refreshVisibleRows();
+            torBoxAdapter.refreshVisibleRows();
             ui.postDelayed(this, 1500L);
         }
     };
@@ -57,14 +61,25 @@ public class TvDownloadsActivity extends FragmentActivity {
         empty = findViewById(R.id.empty);
 
         adapter = new DownloadsAdapter();
+        torBoxAdapter = new TorBoxAdapter();
         list.setLayoutManager(new LinearLayoutManager(this));
-        list.setAdapter(adapter);
+        list.setAdapter(new ConcatAdapter(adapter, torBoxAdapter));
 
         TorrentManager.get().downloads().observe(this, items -> {
             List<DownloadHandle> safe = items == null ? new ArrayList<>() : items;
             adapter.submit(safe);
-            empty.setVisibility(safe.isEmpty() ? View.VISIBLE : View.GONE);
+            updateEmpty();
         });
+        TorBoxManager.get().init(getApplicationContext());
+        TorBoxManager.get().downloads().observe(this, items -> {
+            torBoxAdapter.submit(items == null ? new ArrayList<>() : items);
+            updateEmpty();
+        });
+    }
+
+    private void updateEmpty() {
+        boolean none = adapter.getItemCount() == 0 && torBoxAdapter.getItemCount() == 0;
+        empty.setVisibility(none ? View.VISIBLE : View.GONE);
     }
 
     @Override
@@ -221,6 +236,111 @@ public class TvDownloadsActivity extends FragmentActivity {
                 .setTitle(h.title)
                 .setMessage(sb.toString())
                 .setPositiveButton("OK", null)
+                .show();
+    }
+
+    // ------------------------------------------------------------------
+    // TorBox downloads (full-speed HTTP via the user's TorBox account)
+    // ------------------------------------------------------------------
+
+    private class TorBoxAdapter extends RecyclerView.Adapter<TorBoxAdapter.VH> {
+        private final List<TorBoxManager.Download> items = new ArrayList<>();
+
+        void submit(List<TorBoxManager.Download> next) {
+            // Only structurally rebind when the set of items changes; otherwise
+            // refresh in place so D-pad focus isn't lost during live progress.
+            boolean structural = next.size() != items.size();
+            if (!structural) {
+                for (int i = 0; i < next.size(); i++) {
+                    if (!next.get(i).key.equals(items.get(i).key)) { structural = true; break; }
+                }
+            }
+            items.clear();
+            items.addAll(next);
+            if (structural) notifyDataSetChanged();
+            else refreshVisibleRows();
+        }
+
+        void refreshVisibleRows() {
+            if (list == null) return;
+            for (int i = 0; i < list.getChildCount(); i++) {
+                View child = list.getChildAt(i);
+                RecyclerView.ViewHolder vh = list.getChildViewHolder(child);
+                if (vh instanceof VH) {
+                    int pos = ((VH) vh).getBindingAdapterPosition();
+                    if (pos >= 0 && pos < items.size()) bindDynamic((VH) vh, items.get(pos));
+                }
+            }
+        }
+
+        private void bindDynamic(VH h, TorBoxManager.Download d) {
+            String meta;
+            switch (d.state) {
+                case ADDING:      meta = "Sending to TorBox…"; break;
+                case REMOTE:      meta = "TorBox preparing · " + d.percent + "%"; break;
+                case DOWNLOADING: meta = "Downloading · " + d.percent + "%  ·  "
+                        + FormatUtils.humanSpeed(d.speed); break;
+                case DONE:        meta = "Done · tap to play"; break;
+                case ERROR:       meta = "Error: " + (d.error != null ? d.error : "failed"); break;
+                default:          meta = ""; break;
+            }
+            h.meta.setText("TorBox · " + meta);
+            h.progress.setProgress(d.percent);
+        }
+
+        @NonNull @Override
+        public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            return new VH(LayoutInflater.from(parent.getContext())
+                    .inflate(R.layout.item_tv_download, parent, false));
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull VH h, int position) {
+            TorBoxManager.Download d = items.get(position);
+            h.title.setText(d.title);
+            bindDynamic(h, d);
+            h.itemView.setOnClickListener(v -> onTorBoxClick(d));
+            h.itemView.setOnLongClickListener(v -> { showTorBoxMenu(d); return true; });
+        }
+
+        @Override public int getItemCount() { return items.size(); }
+
+        class VH extends RecyclerView.ViewHolder {
+            final TextView title, meta;
+            final ProgressBar progress;
+            VH(View v) {
+                super(v);
+                title = v.findViewById(R.id.title);
+                meta = v.findViewById(R.id.meta);
+                progress = v.findViewById(R.id.progress);
+            }
+        }
+    }
+
+    private void onTorBoxClick(TorBoxManager.Download d) {
+        if (d.state == TorBoxManager.State.DONE && d.file != null) {
+            TvPlayerActivity.startFile(this, d.file.getAbsolutePath(), d.title);
+        } else {
+            showTorBoxMenu(d);
+        }
+    }
+
+    private void showTorBoxMenu(TorBoxManager.Download d) {
+        List<CharSequence> labels = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        if (d.state == TorBoxManager.State.DONE && d.file != null) {
+            labels.add("Play");
+            actions.add(() -> TvPlayerActivity.startFile(this, d.file.getAbsolutePath(), d.title));
+        }
+        labels.add("Remove from list");
+        actions.add(() -> {
+            TorBoxManager.get().remove(d.key);
+            Toast.makeText(this, "Removed", Toast.LENGTH_SHORT).show();
+        });
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(d.title)
+                .setItems(labels.toArray(new CharSequence[0]),
+                        (dl, which) -> actions.get(which).run())
                 .show();
     }
 }

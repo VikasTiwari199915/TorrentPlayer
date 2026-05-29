@@ -22,6 +22,7 @@ public final class PrefsManager {
     public static final String KEY_AUTO_RESUME = "pref_auto_resume";
     public static final String KEY_SAVE_VOLUME_PATH = "pref_save_volume_path";
     public static final String KEY_TV_BACKDROP = "pref_tv_backdrop";
+    public static final String KEY_TORBOX_KEY = "pref_torbox_key";
 
     private final SharedPreferences sp;
 
@@ -83,5 +84,20 @@ public final class PrefsManager {
 
     public void setTvBackdropEnabled(boolean enabled) {
         sp.edit().putBoolean(KEY_TV_BACKDROP, enabled).apply();
+    }
+
+    /** TorBox API key — enables the "Download via TorBox" path (server-side
+     *  torrent fetch + full-speed HTTP download). Empty = feature off. */
+    public String getTorBoxKey() {
+        return sp.getString(KEY_TORBOX_KEY, "");
+    }
+
+    public void setTorBoxKey(String key) {
+        sp.edit().putString(KEY_TORBOX_KEY, key == null ? "" : key.trim()).apply();
+    }
+
+    public boolean hasTorBoxKey() {
+        String k = getTorBoxKey();
+        return k != null && !k.isEmpty();
     }
 }

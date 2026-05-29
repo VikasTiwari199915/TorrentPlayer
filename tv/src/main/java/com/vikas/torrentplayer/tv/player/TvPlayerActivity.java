@@ -36,10 +36,20 @@ import java.io.File;
 public class TvPlayerActivity extends FragmentActivity {
 
     private static final String EXTRA_HASH = "hash";
+    private static final String EXTRA_FILE = "file";
+    private static final String EXTRA_TITLE = "title";
 
     public static void start(Context ctx, String infoHash) {
         Intent i = new Intent(ctx, TvPlayerActivity.class);
         i.putExtra(EXTRA_HASH, infoHash);
+        ctx.startActivity(i);
+    }
+
+    /** Play a fully-downloaded local file directly (e.g. a TorBox download). */
+    public static void startFile(Context ctx, String absPath, String title) {
+        Intent i = new Intent(ctx, TvPlayerActivity.class);
+        i.putExtra(EXTRA_FILE, absPath);
+        i.putExtra(EXTRA_TITLE, title);
         ctx.startActivity(i);
     }
 
@@ -58,6 +68,23 @@ public class TvPlayerActivity extends FragmentActivity {
         loadingOverlay = findViewById(R.id.loading_overlay);
         loadingTitle = findViewById(R.id.loading_title);
         loadingProgress = findViewById(R.id.loading_progress);
+
+        // Direct local-file playback (TorBox download) — no torrent engine needed.
+        String filePath = getIntent().getStringExtra(EXTRA_FILE);
+        if (filePath != null && !filePath.isEmpty()) {
+            String title = getIntent().getStringExtra(EXTRA_TITLE);
+            try {
+                playLocalFile(new File(filePath), title);
+            } catch (Throwable ex) {
+                android.util.Log.e("TvPlayer", "local file playback failed", ex);
+                android.widget.Toast.makeText(this,
+                        "Player error: " + (ex.getMessage() != null ? ex.getMessage()
+                                : ex.getClass().getSimpleName()),
+                        android.widget.Toast.LENGTH_LONG).show();
+                finish();
+            }
+            return;
+        }
 
         String hash = getIntent().getStringExtra(EXTRA_HASH);
         try {
@@ -139,6 +166,28 @@ public class TvPlayerActivity extends FragmentActivity {
             loadingProgress.setText("Downloaded " + p.percent + "%  ·  "
                     + FormatUtils.humanSpeed(p.downloadSpeed));
         });
+    }
+
+    /** Plain ExoPlayer playback of a finished local file (no TorrentDataSource). */
+    private void playLocalFile(File file, @Nullable String title) {
+        if (!file.exists()) {
+            android.widget.Toast.makeText(this, "File not found",
+                    android.widget.Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
+        player = new ExoPlayer.Builder(this).build();
+        playerView.setPlayer(player);
+        player.setTrackSelectionParameters(
+                player.getTrackSelectionParameters().buildUpon()
+                        .setPreferredTextLanguage(java.util.Locale.getDefault().getLanguage())
+                        .build());
+        player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)));
+        player.setPlayWhenReady(true);
+        player.prepare();
+        player.play();
+        playbackStarted = true;
+        loadingOverlay.setVisibility(View.GONE);
     }
 
     private void beginPlayback(File file) {

@@ -36,12 +36,13 @@ import java.util.concurrent.Executors;
 public class SettingsActivity extends FragmentActivity {
 
     private static final int ITEM_API_KEY = 0;
-    private static final int ITEM_SAVE_DIR = 1;
-    private static final int ITEM_STORAGE_ACCESS = 2;
-    private static final int ITEM_DIAGNOSTICS = 3;
-    private static final int ITEM_BACKDROP = 4;
-    private static final int ITEM_CLEAR_CACHE = 5;
-    private static final int ITEM_CHECK_UPDATES = 6;
+    private static final int ITEM_TORBOX_KEY = 1;
+    private static final int ITEM_SAVE_DIR = 2;
+    private static final int ITEM_STORAGE_ACCESS = 3;
+    private static final int ITEM_DIAGNOSTICS = 4;
+    private static final int ITEM_BACKDROP = 5;
+    private static final int ITEM_CLEAR_CACHE = 6;
+    private static final int ITEM_CHECK_UPDATES = 7;
 
     private PrefsManager prefs;
     private RowsAdapter adapter;
@@ -97,6 +98,24 @@ public class SettingsActivity extends FragmentActivity {
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Save", (d, w) -> {
                     prefs.setApiKey(input.getText().toString());
+                    adapter.notifyDataSetChanged();
+                })
+                .show();
+    }
+
+    private void showTorBoxKeyDialog() {
+        EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        input.setHint("TorBox API key");
+        input.setText(prefs.getTorBoxKey());
+        new AlertDialog.Builder(this)
+                .setTitle("TorBox API key")
+                .setMessage("Find it at torbox.app → Settings → API. Enables the "
+                        + "\"Download via TorBox\" option on each torrent.")
+                .setView(input)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Save", (d, w) -> {
+                    prefs.setTorBoxKey(input.getText().toString());
                     adapter.notifyDataSetChanged();
                 })
                 .show();
@@ -263,7 +282,7 @@ public class SettingsActivity extends FragmentActivity {
 
     private class RowsAdapter extends RecyclerView.Adapter<RowsAdapter.VH> {
         private final List<Integer> rows = Arrays.asList(
-                ITEM_API_KEY, ITEM_SAVE_DIR, ITEM_STORAGE_ACCESS,
+                ITEM_API_KEY, ITEM_TORBOX_KEY, ITEM_SAVE_DIR, ITEM_STORAGE_ACCESS,
                 ITEM_DIAGNOSTICS, ITEM_BACKDROP, ITEM_CLEAR_CACHE, ITEM_CHECK_UPDATES);
 
         @NonNull @Override
@@ -289,6 +308,14 @@ public class SettingsActivity extends FragmentActivity {
                     String key = prefs.getApiKey();
                     t2.setText(key == null || key.isEmpty() ? "Not set" : maskKey(key));
                     h.itemView.setOnClickListener(v -> showApiKeyDialog());
+                    break;
+                case ITEM_TORBOX_KEY:
+                    t1.setText("TorBox API key");
+                    String tb = prefs.getTorBoxKey();
+                    t2.setText(tb == null || tb.isEmpty()
+                            ? "Not set — enables full-speed \"Download via TorBox\""
+                            : maskKey(tb));
+                    h.itemView.setOnClickListener(v -> showTorBoxKeyDialog());
                     break;
                 case ITEM_SAVE_DIR:
                     t1.setText("Save folder");

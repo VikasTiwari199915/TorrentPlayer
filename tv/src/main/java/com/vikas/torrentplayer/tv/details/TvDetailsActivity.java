@@ -24,6 +24,7 @@ import com.vikas.torrentplayer.api.models.DiscoverItem;
 import com.vikas.torrentplayer.api.models.SearchResponse;
 import com.vikas.torrentplayer.api.models.SearchResult;
 import com.vikas.torrentplayer.api.models.TorrentItem;
+import com.vikas.torrentplayer.torbox.TorBoxManager;
 import com.vikas.torrentplayer.torrent.DownloadHandle;
 import com.vikas.torrentplayer.torrent.TorrentManager;
 import com.vikas.torrentplayer.tv.R;
@@ -197,6 +198,79 @@ public class TvDetailsActivity extends FragmentActivity {
         torrentsList.setVisibility(View.GONE);
     }
 
+    /** Lets the user pick how to get this torrent: P2P stream (libtorrent) or a
+     *  full-speed download via TorBox (when a TorBox key is configured). */
+    private void showSourceChooser(TorrentItem t) {
+        boolean hasTorBox = new PrefsManager(this).hasTorBoxKey();
+        java.util.List<CharSequence> labels = new ArrayList<>();
+        java.util.List<Runnable> actions = new ArrayList<>();
+
+        labels.add("Stream now (P2P)");
+        actions.add(() -> playViaP2p(t));
+
+        if (hasTorBox) {
+            labels.add("Download via TorBox (full speed)");
+            actions.add(() -> downloadViaTorBox(t));
+        } else {
+            labels.add("Download via TorBox — set API key in Settings");
+            actions.add(() -> android.widget.Toast.makeText(this,
+                    "Add your TorBox API key in Settings first",
+                    android.widget.Toast.LENGTH_LONG).show());
+        }
+
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(t.rawTitle != null ? t.rawTitle : "Torrent")
+                .setItems(labels.toArray(new CharSequence[0]),
+                        (d, which) -> actions.get(which).run())
+                .show();
+    }
+
+    private void playViaP2p(TorrentItem t) {
+        // init() is idempotent — guards against a fast click before the
+        // foreground service has finished coming up on a cold launch.
+        try {
+            TorrentManager.get().init(getApplicationContext());
+            DownloadHandle hd = TorrentManager.get().startStream(result, t);
+            if (hd == null) {
+                android.widget.Toast.makeText(this,
+                        "Could not start torrent (no handle)",
+                        android.widget.Toast.LENGTH_LONG).show();
+                return;
+            }
+            TvPlayerActivity.start(this, hd.infoHash);
+        } catch (Throwable ex) {
+            android.util.Log.e("TvDetails", "startStream failed", ex);
+            android.widget.Toast.makeText(this,
+                    "Could not start: "
+                            + (ex.getMessage() != null ? ex.getMessage()
+                                                        : ex.getClass().getSimpleName()),
+                    android.widget.Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void downloadViaTorBox(TorrentItem t) {
+        String magnet = t.magnetUrl;
+        if ((magnet == null || magnet.isEmpty())
+                && t.infoHash != null && !t.infoHash.isEmpty()) {
+            // Build a minimal magnet from the info hash if no full magnet given.
+            magnet = "magnet:?xt=urn:btih:" + t.infoHash;
+        }
+        if (magnet == null || magnet.isEmpty()) {
+            android.widget.Toast.makeText(this,
+                    "This torrent has no magnet/hash for TorBox",
+                    android.widget.Toast.LENGTH_LONG).show();
+            return;
+        }
+        String title = item != null && item.title != null ? item.title
+                : (t.rawTitle != null ? t.rawTitle : "Download");
+        TorBoxManager.get().init(getApplicationContext());
+        TorBoxManager.get().startDownload(magnet,
+                t.infoHash != null ? t.infoHash : "", title);
+        android.widget.Toast.makeText(this,
+                "Sent to TorBox — track it in Downloads",
+                android.widget.Toast.LENGTH_LONG).show();
+    }
+
     private class TorrentAdapter extends RecyclerView.Adapter<TorrentAdapter.VH> {
         private final List<TorrentItem> items;
         TorrentAdapter(List<TorrentItem> items) { this.items = items; }
@@ -215,30 +289,7 @@ public class TvDetailsActivity extends FragmentActivity {
             h.size.setText(FormatUtils.humanBytes(t.sizeBytes));
             h.seeders.setText("S: " + t.seeders);
             h.title.setText(t.rawTitle != null ? t.rawTitle : "—");
-            h.itemView.setOnClickListener(v -> {
-                // The engine usually finishes init before any UI surfaces, but
-                // on a fresh launch the foreground service can still be coming
-                // up when the user makes a fast click. Re-running init() is
-                // idempotent so it's safe as a guard.
-                try {
-                    TorrentManager.get().init(getApplicationContext());
-                    DownloadHandle hd = TorrentManager.get().startStream(result, t);
-                    if (hd == null) {
-                        android.widget.Toast.makeText(TvDetailsActivity.this,
-                                "Could not start torrent (no handle)",
-                                android.widget.Toast.LENGTH_LONG).show();
-                        return;
-                    }
-                    TvPlayerActivity.start(TvDetailsActivity.this, hd.infoHash);
-                } catch (Throwable ex) {
-                    android.util.Log.e("TvDetails", "startStream failed", ex);
-                    android.widget.Toast.makeText(TvDetailsActivity.this,
-                            "Could not start: "
-                                    + (ex.getMessage() != null ? ex.getMessage()
-                                                                : ex.getClass().getSimpleName()),
-                            android.widget.Toast.LENGTH_LONG).show();
-                }
-            });
+            h.itemView.setOnClickListener(v -> showSourceChooser(t));
         }
 
         @Override public int getItemCount() { return items.size(); }
