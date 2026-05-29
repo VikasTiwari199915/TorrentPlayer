@@ -1,6 +1,7 @@
 package com.vikas.torrentplayer.torrent;
 
 import android.content.Context;
+import android.os.Build;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
@@ -117,18 +118,25 @@ public class TorrentManager {
 
     /** Snapshot of one writable volume the user can choose as the save location. */
     public static class VolumeInfo {
+        /** Base directory under which {@code TorrentPlayer/} is created. */
         public final File root;
         public final long free;
         public final long total;
         public final boolean isCurrent;
         public final String label;
+        /** True for scoped app-specific media dirs (no permission needed).
+         *  False for raw volume roots like a USB drive — those require
+         *  {@code MANAGE_EXTERNAL_STORAGE} to actually write. */
+        public final boolean isAppDir;
 
-        VolumeInfo(File root, long free, long total, boolean isCurrent, String label) {
+        VolumeInfo(File root, long free, long total, boolean isCurrent,
+                   String label, boolean isAppDir) {
             this.root = root;
             this.free = free;
             this.total = total;
             this.isCurrent = isCurrent;
             this.label = label;
+            this.isAppDir = isAppDir;
         }
     }
 
@@ -301,30 +309,84 @@ public class TorrentManager {
     }
 
     /**
-     * Returns all writable volumes available for saving downloads, with space info.
+     * Returns all volumes the user can choose as a save location, with space info.
      * Must be called after {@link #init}.
+     *
+     * <p>Combines two sources:
+     * <ul>
+     *   <li>{@code getExternalMediaDirs()} — scoped app-specific dirs on internal
+     *       storage and adopted SD cards. Always writable, no permission.</li>
+     *   <li>{@code StorageManager.getStorageVolumes()} — catches <b>portable USB
+     *       drives / removable SD cards</b> that the media-dir API deliberately
+     *       hides. Writing there needs {@code MANAGE_EXTERNAL_STORAGE}; these
+     *       entries carry {@code isAppDir == false} so the UI can prompt.</li>
+     * </ul>
      */
     public List<VolumeInfo> getAvailableVolumes() {
         List<VolumeInfo> result = new ArrayList<>();
         if (appContext == null) return result;
         StorageManager sm = (StorageManager) appContext.getSystemService(Context.STORAGE_SERVICE);
+
+        // 1. Scoped app-specific media dirs — always writable.
+        List<File> mediaDirs = new ArrayList<>();
         File[] media = appContext.getExternalMediaDirs();
-        if (media == null) return result;
-        for (File d : media) {
-            if (d == null) continue;
-            long free = d.getUsableSpace();
-            long total = d.getTotalSpace();
-            boolean isCurrent = saveDir != null && saveDir.getAbsolutePath().startsWith(d.getAbsolutePath());
-            String label;
-            try {
-                StorageVolume sv = sm != null ? sm.getStorageVolume(d) : null;
-                label = sv != null ? sv.getDescription(appContext) : d.getAbsolutePath();
-            } catch (Exception e) {
-                label = d.getAbsolutePath();
+        if (media != null) {
+            for (File d : media) {
+                if (d == null) continue;
+                mediaDirs.add(d);
+                String label = volumeLabel(sm, d, "Internal storage");
+                result.add(makeVolumeInfo(d, label, true));
             }
-            result.add(new VolumeInfo(d, free, total, isCurrent, label));
+        }
+
+        // 2. StorageManager volumes — picks up portable USB / removable SD that
+        //    the media-dir API skips. getDirectory() requires API 30.
+        if (sm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                for (StorageVolume sv : sm.getStorageVolumes()) {
+                    if (!Environment.MEDIA_MOUNTED.equals(sv.getState())) continue;
+                    File dir = sv.getDirectory();
+                    if (dir == null) continue;
+                    // Skip volumes already represented by an app media dir.
+                    boolean covered = false;
+                    for (File md : mediaDirs) {
+                        if (md.getAbsolutePath().startsWith(dir.getAbsolutePath())) {
+                            covered = true;
+                            break;
+                        }
+                    }
+                    if (covered) continue;
+                    String label = sv.getDescription(appContext);
+                    if (label == null || label.isEmpty()) label = dir.getAbsolutePath();
+                    result.add(makeVolumeInfo(dir, label, false));
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "enumerating storage volumes failed", t);
+            }
         }
         return result;
+    }
+
+    private VolumeInfo makeVolumeInfo(File root, String label, boolean isAppDir) {
+        long free = 0, total = 0;
+        try {
+            free = root.getUsableSpace();
+            total = root.getTotalSpace();
+        } catch (Throwable ignored) {}
+        boolean isCurrent = saveDir != null
+                && saveDir.getAbsolutePath().startsWith(root.getAbsolutePath());
+        return new VolumeInfo(root, free, total, isCurrent, label, isAppDir);
+    }
+
+    private String volumeLabel(StorageManager sm, File dir, String fallback) {
+        try {
+            StorageVolume sv = sm != null ? sm.getStorageVolume(dir) : null;
+            if (sv != null) {
+                String desc = sv.getDescription(appContext);
+                if (desc != null && !desc.isEmpty()) return desc;
+            }
+        } catch (Throwable ignored) {}
+        return fallback;
     }
 
     /**

@@ -31,6 +31,7 @@ import com.vikas.torrentplayer.utils.AppUpdateListener;
 import com.vikas.torrentplayer.utils.CacheCleaner;
 import com.vikas.torrentplayer.utils.FormatUtils;
 import com.vikas.torrentplayer.utils.PrefsManager;
+import com.vikas.torrentplayer.utils.StoragePermissions;
 
 import java.io.File;
 import java.util.List;
@@ -160,13 +161,16 @@ public class SettingsFragment extends PreferenceFragmentCompat
     }
 
     private void showVolumePicker(Preference saveDirPref, List<TorrentManager.VolumeInfo> vols) {
+        boolean granted = StoragePermissions.hasAllFilesAccess();
         String[] labels = new String[vols.size()];
         int checkedIdx = 0;
         for (int i = 0; i < vols.size(); i++) {
             TorrentManager.VolumeInfo v = vols.get(i);
-            labels[i] = v.label + "\n"
-                    + FormatUtils.humanBytes(v.free) + " free / "
-                    + FormatUtils.humanBytes(v.total) + " total";
+            String space = (!v.isAppDir && !granted)
+                    ? "Needs permission — select to grant"
+                    : FormatUtils.humanBytes(v.free) + " free / "
+                            + FormatUtils.humanBytes(v.total) + " total";
+            labels[i] = v.label + "\n" + space;
             if (v.isCurrent) checkedIdx = i;
         }
         final int[] selected = {checkedIdx};
@@ -175,8 +179,35 @@ public class SettingsFragment extends PreferenceFragmentCompat
                 .setSingleChoiceItems(labels, checkedIdx, (d, which) -> selected[0] = which)
                 .setNegativeButton(R.string.dialog_cancel, null)
                 .setPositiveButton(R.string.dialog_save, (d, w) -> {
-                    TorrentManager.get().switchVolume(vols.get(selected[0]).root);
+                    TorrentManager.VolumeInfo chosen = vols.get(selected[0]);
+                    if (!chosen.isAppDir && !StoragePermissions.hasAllFilesAccess()) {
+                        promptAllFilesAccess();
+                        return;
+                    }
+                    TorrentManager.get().switchVolume(chosen.root);
                     refreshSaveDirSummary(saveDirPref);
+                })
+                .show();
+    }
+
+    /** USB / SD writes need All-files access — send the user to the system toggle. */
+    private void promptAllFilesAccess() {
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Storage permission needed")
+                .setMessage("To download onto a USB drive or removable SD card, allow "
+                        + "“All files access” for TorrentPlayer, then pick the volume again.")
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .setPositiveButton("Open settings", (d, w) -> {
+                    try {
+                        startActivity(StoragePermissions.buildRequestIntent(requireContext()));
+                    } catch (Exception e1) {
+                        try {
+                            startActivity(StoragePermissions.buildFallbackIntent());
+                        } catch (Exception e2) {
+                            Toast.makeText(requireContext(),
+                                    "Couldn't open storage settings", Toast.LENGTH_LONG).show();
+                        }
+                    }
                 })
                 .show();
     }

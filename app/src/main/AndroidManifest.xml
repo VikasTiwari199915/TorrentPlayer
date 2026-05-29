@@ -14,6 +14,12 @@
     <!-- Auto-updater: required for the system installer flow on Android 8+. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Write downloads onto portable USB drives / removable SD cards.
+         Scoped storage can't give libtorrent a File path on those volumes;
+         All-files access can. App is sideloaded, so Play policy doesn't apply. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+
     <!-- Android 11+ package visibility: we explicitly want to be able to fire
          an ACTION_VIEW for the APK MIME type. -->
     <queries>

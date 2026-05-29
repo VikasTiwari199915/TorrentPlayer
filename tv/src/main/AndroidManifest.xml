@@ -6,6 +6,12 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Write downloads onto portable USB drives / removable SD cards.
+         Scoped storage can't give libtorrent a File path on those volumes;
+         All-files access can. App is sideloaded, so Play policy doesn't apply. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
