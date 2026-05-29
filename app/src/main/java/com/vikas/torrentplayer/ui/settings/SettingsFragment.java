@@ -194,19 +194,15 @@ public class SettingsFragment extends PreferenceFragmentCompat
     private void promptAllFilesAccess() {
         new MaterialAlertDialogBuilder(requireContext())
                 .setTitle("Storage permission needed")
-                .setMessage("To download onto a USB drive or removable SD card, allow "
-                        + "“All files access” for TorrentPlayer, then pick the volume again.")
+                .setMessage("To download onto a USB drive or SD card, open this app's "
+                        + "info screen, tap \"Files and media\" (or \"All files access\"), "
+                        + "and choose \"Allow management of files\". Then come back and "
+                        + "pick the volume again.")
                 .setNegativeButton(R.string.dialog_cancel, null)
                 .setPositiveButton("Open settings", (d, w) -> {
-                    try {
-                        startActivity(StoragePermissions.buildRequestIntent(requireContext()));
-                    } catch (Exception e1) {
-                        try {
-                            startActivity(StoragePermissions.buildFallbackIntent());
-                        } catch (Exception e2) {
-                            Toast.makeText(requireContext(),
-                                    "Couldn't open storage settings", Toast.LENGTH_LONG).show();
-                        }
+                    if (!StoragePermissions.openBestSettings(requireContext())) {
+                        Toast.makeText(requireContext(),
+                                "Couldn't open storage settings", Toast.LENGTH_LONG).show();
                     }
                 })
                 .show();

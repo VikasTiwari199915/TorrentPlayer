@@ -37,8 +37,10 @@ public class SettingsActivity extends FragmentActivity {
 
     private static final int ITEM_API_KEY = 0;
     private static final int ITEM_SAVE_DIR = 1;
-    private static final int ITEM_CLEAR_CACHE = 2;
-    private static final int ITEM_CHECK_UPDATES = 3;
+    private static final int ITEM_STORAGE_ACCESS = 2;
+    private static final int ITEM_DIAGNOSTICS = 3;
+    private static final int ITEM_CLEAR_CACHE = 4;
+    private static final int ITEM_CHECK_UPDATES = 5;
 
     private PrefsManager prefs;
     private RowsAdapter adapter;
@@ -70,6 +72,13 @@ public class SettingsActivity extends FragmentActivity {
         root.addView(list);
 
         setContentView(root);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Permission may have been granted in the system settings screen.
+        if (adapter != null) adapter.notifyDataSetChanged();
     }
 
     private int dp(int v) {
@@ -146,25 +155,36 @@ public class SettingsActivity extends FragmentActivity {
                 .show();
     }
 
+    private void showDiagnostics() {
+        String dump = TorrentManager.get().getStorageDiagnostics();
+        TextView tv = new TextView(this);
+        tv.setText(dump);
+        tv.setTextColor(0xFFFFFFFF);
+        tv.setTextSize(12);
+        tv.setTypeface(android.graphics.Typeface.MONOSPACE);
+        tv.setPadding(dp(24), dp(16), dp(24), dp(16));
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.addView(tv);
+        new AlertDialog.Builder(this)
+                .setTitle("Storage diagnostics")
+                .setView(scroll)
+                .setPositiveButton("Close", null)
+                .show();
+    }
+
     /** USB / SD writes need All-files access — send the user to the system toggle. */
     private void promptAllFilesAccess() {
         new AlertDialog.Builder(this)
                 .setTitle("Storage permission needed")
-                .setMessage("To download onto a USB drive or removable SD card, allow "
-                        + "“All files access” for TorrentPlayer, then pick the "
-                        + "volume again.")
+                .setMessage("To download onto a USB drive or SD card, open this app's "
+                        + "info screen, tap \"Files and media\" (or \"All files access\"), "
+                        + "and choose \"Allow management of files\". Then come back and "
+                        + "pick the volume again.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Open settings", (d, w) -> {
-                    try {
-                        startActivity(StoragePermissions.buildRequestIntent(this));
-                    } catch (Exception e1) {
-                        try {
-                            startActivity(StoragePermissions.buildFallbackIntent());
-                        } catch (Exception e2) {
-                            Toast.makeText(this,
-                                    "Couldn't open storage settings: " + e2.getMessage(),
-                                    Toast.LENGTH_LONG).show();
-                        }
+                    if (!StoragePermissions.openBestSettings(this)) {
+                        Toast.makeText(this, "Couldn't open storage settings",
+                                Toast.LENGTH_LONG).show();
                     }
                 })
                 .show();
@@ -242,7 +262,8 @@ public class SettingsActivity extends FragmentActivity {
 
     private class RowsAdapter extends RecyclerView.Adapter<RowsAdapter.VH> {
         private final List<Integer> rows = Arrays.asList(
-                ITEM_API_KEY, ITEM_SAVE_DIR, ITEM_CLEAR_CACHE, ITEM_CHECK_UPDATES);
+                ITEM_API_KEY, ITEM_SAVE_DIR, ITEM_STORAGE_ACCESS,
+                ITEM_DIAGNOSTICS, ITEM_CLEAR_CACHE, ITEM_CHECK_UPDATES);
 
         @NonNull @Override
         public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
@@ -284,6 +305,18 @@ public class SettingsActivity extends FragmentActivity {
                         t2.setText(path);
                     }
                     h.itemView.setOnClickListener(v -> showSaveDirDialog());
+                    break;
+                case ITEM_STORAGE_ACCESS:
+                    t1.setText("Storage access (USB / SD)");
+                    t2.setText(StoragePermissions.hasAllFilesAccess()
+                            ? "Granted — external drives are usable"
+                            : "Not granted — tap to enable for USB drives");
+                    h.itemView.setOnClickListener(v -> promptAllFilesAccess());
+                    break;
+                case ITEM_DIAGNOSTICS:
+                    t1.setText("Storage diagnostics");
+                    t2.setText("Show what the system reports about drives");
+                    h.itemView.setOnClickListener(v -> showDiagnostics());
                     break;
                 case ITEM_CLEAR_CACHE:
                     t1.setText("Clear downloads & cache");

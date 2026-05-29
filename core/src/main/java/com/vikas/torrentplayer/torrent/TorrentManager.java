@@ -322,20 +322,33 @@ public class TorrentManager {
      *       entries carry {@code isAppDir == false} so the UI can prompt.</li>
      * </ul>
      */
+    /** Raw filesystem mount roots to probe for USB / SD drives that the official
+     *  storage APIs miss on cheap Android TV boxes. */
+    private static final String[] MOUNT_SCAN_ROOTS = {
+            "/storage", "/mnt/media_rw", "/mnt"
+    };
+    /** Children of the scan roots that are never user-selectable drives. */
+    private static final String[] MOUNT_SKIP_NAMES = {
+            "emulated", "self", "enc_emulated", "container", "knox-emulated",
+            "media_rw", "runtime", "sdcard", "asec", "obb", "secure",
+            "android_secure", "appfuse", "user", "shell", "data"
+    };
+
     public List<VolumeInfo> getAvailableVolumes() {
         List<VolumeInfo> result = new ArrayList<>();
         if (appContext == null) return result;
         StorageManager sm = (StorageManager) appContext.getSystemService(Context.STORAGE_SERVICE);
+        // Track every root we've already added so the three sources don't duplicate.
+        List<String> addedRoots = new ArrayList<>();
 
         // 1. Scoped app-specific media dirs — always writable.
-        List<File> mediaDirs = new ArrayList<>();
         File[] media = appContext.getExternalMediaDirs();
         if (media != null) {
             for (File d : media) {
                 if (d == null) continue;
-                mediaDirs.add(d);
                 String label = volumeLabel(sm, d, "Internal storage");
                 result.add(makeVolumeInfo(d, label, true));
+                addedRoots.add(d.getAbsolutePath());
             }
         }
 
@@ -347,24 +360,111 @@ public class TorrentManager {
                     if (!Environment.MEDIA_MOUNTED.equals(sv.getState())) continue;
                     File dir = sv.getDirectory();
                     if (dir == null) continue;
-                    // Skip volumes already represented by an app media dir.
-                    boolean covered = false;
-                    for (File md : mediaDirs) {
-                        if (md.getAbsolutePath().startsWith(dir.getAbsolutePath())) {
-                            covered = true;
-                            break;
-                        }
-                    }
-                    if (covered) continue;
+                    if (isCoveredBy(dir, addedRoots)) continue;
                     String label = sv.getDescription(appContext);
                     if (label == null || label.isEmpty()) label = dir.getAbsolutePath();
                     result.add(makeVolumeInfo(dir, label, false));
+                    addedRoots.add(dir.getAbsolutePath());
                 }
             } catch (Throwable t) {
                 Log.w(TAG, "enumerating storage volumes failed", t);
             }
         }
+
+        // 3. Raw filesystem scan — last resort for boxes whose StorageManager
+        //    doesn't report the USB drive at all.
+        for (String rootPath : MOUNT_SCAN_ROOTS) {
+            File[] children = new File(rootPath).listFiles();
+            if (children == null) continue;
+            for (File child : children) {
+                if (child == null || !child.isDirectory()) continue;
+                if (isSkippedMount(child.getName())) continue;
+                if (isCoveredBy(child, addedRoots)) continue;
+                // Only offer mounts that look real (have some total space) OR are
+                // at least listable — pre-permission space reads return 0, so we
+                // keep them and let the UI flag "needs permission".
+                result.add(makeVolumeInfo(child, child.getName(), false));
+                addedRoots.add(child.getAbsolutePath());
+            }
+        }
         return result;
+    }
+
+    private boolean isCoveredBy(File dir, List<String> addedRoots) {
+        String p = dir.getAbsolutePath();
+        for (String r : addedRoots) {
+            // Either the candidate sits under an added root, or an added media
+            // dir sits under the candidate (same physical volume).
+            if (p.startsWith(r) || r.startsWith(p)) return true;
+        }
+        return false;
+    }
+
+    private boolean isSkippedMount(String name) {
+        for (String s : MOUNT_SKIP_NAMES) if (s.equalsIgnoreCase(name)) return true;
+        return false;
+    }
+
+    /**
+     * Human-readable dump of everything the OS reports about storage, so a user
+     * on a device we can't reach via adb can read it back. Surfaced in Settings.
+     */
+    public String getStorageDiagnostics() {
+        StringBuilder sb = new StringBuilder();
+        if (appContext == null) return "TorrentManager not initialised.";
+        sb.append("All-files access: ")
+                .append(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                        ? Environment.isExternalStorageManager() : "n/a (<API30)")
+                .append("\nAPI level: ").append(Build.VERSION.SDK_INT)
+                .append("\nCurrent save dir: ")
+                .append(saveDir != null ? saveDir.getAbsolutePath() : "—");
+
+        sb.append("\n\n[getExternalMediaDirs]");
+        File[] media = appContext.getExternalMediaDirs();
+        if (media == null) sb.append("\n  null");
+        else for (File d : media) {
+            sb.append("\n  ").append(d == null ? "null"
+                    : d.getAbsolutePath() + "  (" + (d.getUsableSpace() / (1024 * 1024)) + " MB free)");
+        }
+
+        sb.append("\n\n[StorageManager.getStorageVolumes]");
+        StorageManager sm = (StorageManager) appContext.getSystemService(Context.STORAGE_SERVICE);
+        if (sm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                for (StorageVolume sv : sm.getStorageVolumes()) {
+                    File dir = sv.getDirectory();
+                    sb.append("\n  ").append(sv.getDescription(appContext))
+                            .append(" | state=").append(sv.getState())
+                            .append(" | removable=").append(sv.isRemovable())
+                            .append(" | dir=").append(dir != null ? dir.getAbsolutePath() : "null");
+                }
+            } catch (Throwable t) {
+                sb.append("\n  error: ").append(t.getMessage());
+            }
+        }
+
+        sb.append("\n\n[Filesystem scan]");
+        for (String rootPath : MOUNT_SCAN_ROOTS) {
+            File root = new File(rootPath);
+            File[] children = root.listFiles();
+            sb.append("\n  ").append(rootPath).append(": ");
+            if (children == null) {
+                sb.append(root.exists() ? "(not listable)" : "(absent)");
+            } else if (children.length == 0) {
+                sb.append("(empty)");
+            } else {
+                for (File c : children) {
+                    sb.append("\n     ").append(c.getName())
+                            .append(c.isDirectory() ? "/" : "")
+                            .append(" r=").append(c.canRead())
+                            .append(" w=").append(c.canWrite());
+                    long total = 0;
+                    try { total = c.getTotalSpace(); } catch (Throwable ignored) {}
+                    if (total > 0) sb.append(" total=").append(total / (1024 * 1024)).append("MB");
+                }
+            }
+        }
+        return sb.toString();
     }
 
     private VolumeInfo makeVolumeInfo(File root, String label, boolean isAppDir) {

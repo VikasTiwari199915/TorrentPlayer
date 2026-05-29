@@ -39,4 +39,34 @@ public final class StoragePermissions {
     public static Intent buildFallbackIntent() {
         return new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
     }
+
+    /** App-info / details page. Last-resort fallback: on Android-TV OEM skins the
+     *  dedicated All-files-access screens often don't exist, but the app-info page
+     *  exposes the "Files and media → Allow management of files" toggle. */
+    public static Intent buildAppDetailsIntent(Context ctx) {
+        Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+        i.setData(Uri.parse("package:" + ctx.getPackageName()));
+        return i;
+    }
+
+    /**
+     * Tries each storage-permission settings screen in turn, returning true once
+     * one launches. Order: per-app all-files → global all-files list → app info.
+     */
+    public static boolean openBestSettings(Context ctx) {
+        Intent[] candidates = {
+                buildRequestIntent(ctx),
+                buildFallbackIntent(),
+                buildAppDetailsIntent(ctx)
+        };
+        for (Intent i : candidates) {
+            try {
+                ctx.startActivity(i);
+                return true;
+            } catch (Exception ignored) {
+                // try next
+            }
+        }
+        return false;
+    }
 }

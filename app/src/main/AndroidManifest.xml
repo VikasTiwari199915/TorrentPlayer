@@ -16,9 +16,16 @@
 
     <!-- Write downloads onto portable USB drives / removable SD cards.
          Scoped storage can't give libtorrent a File path on those volumes;
-         All-files access can. App is sideloaded, so Play policy doesn't apply. -->
+         All-files access can. App is sideloaded, so Play policy doesn't apply.
+         READ/WRITE_EXTERNAL_STORAGE are declared too so the OEM's "Files and
+         media" permission group (with the "Allow management of files" toggle)
+         actually surfaces in App Info — MANAGE alone is a special-access perm
+         that some skins never show. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
 
     <!-- Android 11+ package visibility: we explicitly want to be able to fire
          an ACTION_VIEW for the APK MIME type. -->
