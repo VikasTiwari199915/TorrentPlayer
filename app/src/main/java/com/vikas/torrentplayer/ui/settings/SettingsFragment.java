@@ -56,6 +56,15 @@ public class SettingsFragment extends PreferenceFragmentCompat
             refreshApiKeySummary();
         }
 
+        Preference tmdbKey = findPreference(PrefsManager.KEY_TMDB_CREDENTIAL);
+        if (tmdbKey != null) {
+            tmdbKey.setOnPreferenceClickListener(p -> {
+                showTmdbCredentialDialog();
+                return true;
+            });
+            refreshTmdbSummary();
+        }
+
         Preference torboxKey = findPreference("pref_torbox_key");
         if (torboxKey != null) {
             refreshTorBoxSummary(torboxKey);
@@ -300,6 +309,30 @@ public class SettingsFragment extends PreferenceFragmentCompat
                 .show();
     }
 
+    private void showTmdbCredentialDialog() {
+        EditText input = new EditText(requireContext());
+        input.setHint("TMDB read token or API key");
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        input.setSingleLine();
+        input.setText(prefs.getTmdbCredential());
+
+        FrameLayout container = new FrameLayout(requireContext());
+        int pad = dp(24);
+        container.setPadding(pad, dp(8), pad, 0);
+        container.addView(input);
+
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.pref_tmdb_key_title)
+                .setMessage("Use either a TMDB v4 read token or a v3 API key. This powers show season and episode selectors.")
+                .setView(container)
+                .setNegativeButton(R.string.dialog_cancel, null)
+                .setPositiveButton(R.string.dialog_save, (d, w) -> {
+                    prefs.setTmdbCredential(input.getText().toString());
+                    refreshTmdbSummary();
+                })
+                .show();
+    }
+
     private void refreshTorBoxSummary(Preference p) {
         String k = prefs.getTorBoxKey();
         if (k == null || k.isEmpty()) {
@@ -350,6 +383,18 @@ public class SettingsFragment extends PreferenceFragmentCompat
         }
     }
 
+    private void refreshTmdbSummary() {
+        Preference p = findPreference(PrefsManager.KEY_TMDB_CREDENTIAL);
+        if (p == null) return;
+        String key = prefs.getTmdbCredential();
+        if (key == null || key.isEmpty()) {
+            p.setSummary(R.string.pref_api_key_not_set);
+        } else {
+            p.setSummary(key.length() <= 8 ? "••••••••"
+                    : key.substring(0, 4) + "•••••" + key.substring(key.length() - 4));
+        }
+    }
+
     private int dp(int dp) {
         float d = getResources().getDisplayMetrics().density;
         return (int) (dp * d);
@@ -372,5 +417,6 @@ public class SettingsFragment extends PreferenceFragmentCompat
     @Override
     public void onSharedPreferenceChanged(SharedPreferences sp, @Nullable String key) {
         if (PrefsManager.KEY_API_KEY.equals(key)) refreshApiKeySummary();
+        if (PrefsManager.KEY_TMDB_CREDENTIAL.equals(key)) refreshTmdbSummary();
     }
 }

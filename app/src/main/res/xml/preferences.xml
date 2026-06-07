@@ -8,6 +8,11 @@
             android:title="@string/pref_api_key_title"
             android:summary="@string/pref_api_key_summary"
             android:icon="@drawable/rounded_settings_24" />
+        <Preference
+            android:key="pref_tmdb_credential"
+            android:title="@string/pref_tmdb_key_title"
+            android:summary="@string/pref_tmdb_key_summary"
+            android:icon="@drawable/rounded_settings_24" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="TorBox">

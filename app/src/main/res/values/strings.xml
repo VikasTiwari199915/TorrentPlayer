@@ -39,6 +39,12 @@
     <string name="detail_torrents">Available Torrents</string>
     <string name="detail_no_torrents">No torrents available for this title.</string>
     <string name="detail_loading_torrents">Loading torrents…</string>
+    <string name="detail_episodes">Episodes</string>
+    <string name="detail_episodes_source">Season and episode metadata provided by TMDB.</string>
+    <string name="detail_all_seasons">All seasons</string>
+    <string name="detail_all_episodes">All released episodes</string>
+    <string name="pref_tmdb_key_title">TMDB API credential</string>
+    <string name="pref_tmdb_key_summary">Read token or API key for season and episode metadata</string>
     <string name="action_play">Play</string>
     <string name="action_download">Download</string>
     <string name="action_magnet">Magnet</string>

@@ -20,11 +20,16 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.bumptech.glide.Glide;
 import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions;
 import com.vikas.torrentplayer.api.ApiClient;
+import com.vikas.torrentplayer.api.TMDBApiService;
 import com.vikas.torrentplayer.api.TorrentClawApi;
 import com.vikas.torrentplayer.api.models.DiscoverItem;
 import com.vikas.torrentplayer.api.models.SearchResponse;
 import com.vikas.torrentplayer.api.models.SearchResult;
 import com.vikas.torrentplayer.api.models.TorrentItem;
+import com.vikas.torrentplayer.api.models.tmdb.TMDBEpisode;
+import com.vikas.torrentplayer.api.models.tmdb.TMDBSeasonDetails;
+import com.vikas.torrentplayer.api.models.tmdb.TMDBSeasonSummary;
+import com.vikas.torrentplayer.api.models.tmdb.TMDBSeriesDetails;
 import com.vikas.torrentplayer.torbox.TorBoxManager;
 import com.vikas.torrentplayer.tv.torbox.TorBoxFileChooser;
 import com.vikas.torrentplayer.torrent.DownloadHandle;
@@ -64,8 +69,13 @@ public class TvDetailsActivity extends FragmentActivity {
     private SearchResult result;
     private boolean backdropEnabled;
     private Integer filterSeason, filterEpisode;
+    private List<TMDBSeasonSummary> tmdbSeasons = new ArrayList<>();
+    private List<TMDBEpisode> tmdbEpisodes = new ArrayList<>();
 
     private final TorrentClawApi api = ApiClient.get();
+    private final TMDBApiService tmdb = ApiClient.tmdb();
+    @Nullable private Call<TMDBSeriesDetails> tmdbSeriesCall;
+    @Nullable private Call<TMDBSeasonDetails> tmdbSeasonCall;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -92,6 +102,7 @@ public class TvDetailsActivity extends FragmentActivity {
             filterSe.setVisibility(View.VISIBLE);
             filterSe.setOnClickListener(v -> showSeasonEpisodeDialog());
             updateFilterLabel();
+            loadSeriesDetails();
         }
         bindHeader(item);
         searchByTitle(item);
@@ -109,8 +120,17 @@ public class TvDetailsActivity extends FragmentActivity {
         filterSe.setText("Filter: " + label);
     }
 
-    /** D-pad dialog with season + episode inputs (episode requires a season). */
+    /** Prefer TMDB pickers when available; otherwise use manual season/episode inputs. */
     private void showSeasonEpisodeDialog() {
+        if (!tmdbSeasons.isEmpty()) {
+            showSeasonPicker();
+            return;
+        }
+        showManualSeasonEpisodeDialog();
+    }
+
+    /** D-pad dialog with season + episode inputs (episode requires a season). */
+    private void showManualSeasonEpisodeDialog() {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         int pad = (int) (24 * getResources().getDisplayMetrics().density);
@@ -154,12 +174,145 @@ public class TvDetailsActivity extends FragmentActivity {
                 .show();
     }
 
+    private void loadSeriesDetails() {
+        PrefsManager prefs = new PrefsManager(this);
+        Long tmdbId = effectiveTmdbId();
+        if (tmdbId == null || tmdbId <= 0 || !prefs.hasTmdbCredential()) {
+            return;
+        }
+        String credential = prefs.getTmdbCredential();
+        if (tmdbSeriesCall != null) tmdbSeriesCall.cancel();
+        tmdbSeriesCall = tmdb.seriesDetails(
+                tmdbBearer(credential), tmdbId, tmdbApiKey(credential), "en-US");
+        tmdbSeriesCall.enqueue(new Callback<TMDBSeriesDetails>() {
+            @Override public void onResponse(@NonNull Call<TMDBSeriesDetails> call,
+                                             @NonNull Response<TMDBSeriesDetails> response) {
+                if (call.isCanceled()) return;
+                if (!response.isSuccessful() || response.body() == null
+                        || response.body().seasons == null) {
+                    return;
+                }
+                tmdbSeasons = new ArrayList<>(response.body().seasons);
+                updateFilterLabel();
+            }
+
+            @Override public void onFailure(@NonNull Call<TMDBSeriesDetails> call,
+                                            @NonNull Throwable t) {
+                // Manual filtering remains available; no need to interrupt TV browsing.
+            }
+        });
+    }
+
+    private void showSeasonPicker() {
+        CharSequence[] labels = new CharSequence[tmdbSeasons.size() + 2];
+        labels[0] = "All episodes";
+        labels[1] = "Enter manually";
+        int checked = 0;
+        for (int i = 0; i < tmdbSeasons.size(); i++) {
+            TMDBSeasonSummary s = tmdbSeasons.get(i);
+            labels[i + 2] = s.displayTitle();
+            if (filterSeason != null && filterSeason == s.seasonNumber
+                    && filterEpisode == null) {
+                checked = i + 2;
+            }
+        }
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Season")
+                .setSingleChoiceItems(labels, checked, (d, which) -> {
+                    d.dismiss();
+                    if (which == 0) {
+                        filterSeason = null;
+                        filterEpisode = null;
+                        tmdbEpisodes = new ArrayList<>();
+                        updateFilterLabel();
+                        searchByTitle(item);
+                    } else if (which == 1) {
+                        showManualSeasonEpisodeDialog();
+                    } else {
+                        int season = tmdbSeasons.get(which - 2).seasonNumber;
+                        filterSeason = season;
+                        filterEpisode = null;
+                        updateFilterLabel();
+                        searchByTitle(item);
+                        loadEpisodesThenShowPicker(season);
+                    }
+                })
+                .show();
+    }
+
+    private void loadEpisodesThenShowPicker(int season) {
+        PrefsManager prefs = new PrefsManager(this);
+        Long tmdbId = effectiveTmdbId();
+        if (tmdbId == null || !prefs.hasTmdbCredential()) return;
+        String credential = prefs.getTmdbCredential();
+        if (tmdbSeasonCall != null) tmdbSeasonCall.cancel();
+        tmdbSeasonCall = tmdb.seasonDetails(
+                tmdbBearer(credential), tmdbId, season,
+                tmdbApiKey(credential), "en-US");
+        tmdbSeasonCall.enqueue(new Callback<TMDBSeasonDetails>() {
+            @Override public void onResponse(@NonNull Call<TMDBSeasonDetails> call,
+                                             @NonNull Response<TMDBSeasonDetails> response) {
+                if (call.isCanceled()) return;
+                if (!response.isSuccessful() || response.body() == null
+                        || response.body().episodes == null) {
+                    return;
+                }
+                List<TMDBEpisode> out = new ArrayList<>();
+                for (TMDBEpisode e : response.body().episodes) {
+                    if (e != null && e.isReleased()) out.add(e);
+                }
+                tmdbEpisodes = out;
+                if (!out.isEmpty() && !isFinishing() && !isDestroyed()) showEpisodePicker();
+            }
+
+            @Override public void onFailure(@NonNull Call<TMDBSeasonDetails> call,
+                                            @NonNull Throwable t) {
+            }
+        });
+    }
+
+    private void showEpisodePicker() {
+        CharSequence[] labels = new CharSequence[tmdbEpisodes.size() + 1];
+        labels[0] = "Full season";
+        int checked = 0;
+        for (int i = 0; i < tmdbEpisodes.size(); i++) {
+            TMDBEpisode e = tmdbEpisodes.get(i);
+            labels[i + 1] = e.displayTitle();
+            if (filterEpisode != null && filterEpisode == e.episodeNumber) checked = i + 1;
+        }
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Episode")
+                .setSingleChoiceItems(labels, checked, (d, which) -> {
+                    d.dismiss();
+                    filterEpisode = which == 0 ? null : tmdbEpisodes.get(which - 1).episodeNumber;
+                    updateFilterLabel();
+                    searchByTitle(item);
+                })
+                .show();
+    }
+
     private static Integer parseOrNull(String s) {
         if (s == null) return null;
         s = s.trim();
         if (s.isEmpty()) return null;
         try { int v = Integer.parseInt(s); return v > 0 ? v : null; }
         catch (NumberFormatException e) { return null; }
+    }
+
+    @Nullable private static String tmdbBearer(String credential) {
+        String c = credential == null ? "" : credential.trim();
+        return c.contains(".") ? "Bearer " + c : null;
+    }
+
+    @Nullable private static String tmdbApiKey(String credential) {
+        String c = credential == null ? "" : credential.trim();
+        return c.isEmpty() || c.contains(".") ? null : c;
+    }
+
+    @Nullable private Long effectiveTmdbId() {
+        if (item != null && item.tmdbId != null && item.tmdbId > 0) return item.tmdbId;
+        if (result != null && result.tmdbId != null && result.tmdbId > 0) return result.tmdbId;
+        return null;
     }
 
     private void bindHeader(DiscoverItem d) {
@@ -234,6 +387,9 @@ public class TvDetailsActivity extends FragmentActivity {
                     return;
                 }
                 result = best;
+                if (item != null && item.isShow() && tmdbSeasons.isEmpty()) {
+                    loadSeriesDetails();
+                }
                 // The search result often has richer art than the discover card —
                 // upgrade the backdrop / poster if the initial one was missing.
                 if (item == null || item.backdropUrl == null) loadBackdrop(best.backdropUrl);
@@ -278,6 +434,13 @@ public class TvDetailsActivity extends FragmentActivity {
         empty.setText(msg);
         empty.setVisibility(View.VISIBLE);
         torrentsList.setVisibility(View.GONE);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (tmdbSeriesCall != null) tmdbSeriesCall.cancel();
+        if (tmdbSeasonCall != null) tmdbSeasonCall.cancel();
+        super.onDestroy();
     }
 
     /** Lets the user pick how to get this torrent: P2P stream (libtorrent) or a

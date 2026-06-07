@@ -36,14 +36,15 @@ import java.util.concurrent.Executors;
 public class SettingsActivity extends FragmentActivity {
 
     private static final int ITEM_API_KEY = 0;
-    private static final int ITEM_TORBOX_KEY = 1;
-    private static final int ITEM_TORBOX_LIBRARY = 2;
-    private static final int ITEM_SAVE_DIR = 3;
-    private static final int ITEM_STORAGE_ACCESS = 4;
-    private static final int ITEM_DIAGNOSTICS = 5;
-    private static final int ITEM_BACKDROP = 6;
-    private static final int ITEM_CLEAR_CACHE = 7;
-    private static final int ITEM_CHECK_UPDATES = 8;
+    private static final int ITEM_TMDB_KEY = 1;
+    private static final int ITEM_TORBOX_KEY = 2;
+    private static final int ITEM_TORBOX_LIBRARY = 3;
+    private static final int ITEM_SAVE_DIR = 4;
+    private static final int ITEM_STORAGE_ACCESS = 5;
+    private static final int ITEM_DIAGNOSTICS = 6;
+    private static final int ITEM_BACKDROP = 7;
+    private static final int ITEM_CLEAR_CACHE = 8;
+    private static final int ITEM_CHECK_UPDATES = 9;
 
     private PrefsManager prefs;
     private RowsAdapter adapter;
@@ -117,6 +118,23 @@ public class SettingsActivity extends FragmentActivity {
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Save", (d, w) -> {
                     prefs.setTorBoxKey(input.getText().toString());
+                    adapter.notifyDataSetChanged();
+                })
+                .show();
+    }
+
+    private void showTmdbCredentialDialog() {
+        EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        input.setHint("TMDB read token or API key");
+        input.setText(prefs.getTmdbCredential());
+        new AlertDialog.Builder(this)
+                .setTitle("TMDB API credential")
+                .setMessage("Use either a TMDB v4 read token or a v3 API key. This powers show season and episode pickers.")
+                .setView(input)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Save", (d, w) -> {
+                    prefs.setTmdbCredential(input.getText().toString());
                     adapter.notifyDataSetChanged();
                 })
                 .show();
@@ -283,7 +301,7 @@ public class SettingsActivity extends FragmentActivity {
 
     private class RowsAdapter extends RecyclerView.Adapter<RowsAdapter.VH> {
         private final List<Integer> rows = Arrays.asList(
-                ITEM_API_KEY, ITEM_TORBOX_KEY, ITEM_TORBOX_LIBRARY, ITEM_SAVE_DIR,
+                ITEM_API_KEY, ITEM_TMDB_KEY, ITEM_TORBOX_KEY, ITEM_TORBOX_LIBRARY, ITEM_SAVE_DIR,
                 ITEM_STORAGE_ACCESS, ITEM_DIAGNOSTICS, ITEM_BACKDROP,
                 ITEM_CLEAR_CACHE, ITEM_CHECK_UPDATES);
 
@@ -310,6 +328,14 @@ public class SettingsActivity extends FragmentActivity {
                     String key = prefs.getApiKey();
                     t2.setText(key == null || key.isEmpty() ? "Not set" : maskKey(key));
                     h.itemView.setOnClickListener(v -> showApiKeyDialog());
+                    break;
+                case ITEM_TMDB_KEY:
+                    t1.setText("TMDB API credential");
+                    String tmdb = prefs.getTmdbCredential();
+                    t2.setText(tmdb == null || tmdb.isEmpty()
+                            ? "Not set — enables season and episode pickers"
+                            : maskKey(tmdb));
+                    h.itemView.setOnClickListener(v -> showTmdbCredentialDialog());
                     break;
                 case ITEM_TORBOX_KEY:
                     t1.setText("TorBox API key");

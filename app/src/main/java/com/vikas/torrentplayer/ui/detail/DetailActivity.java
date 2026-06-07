@@ -22,6 +22,9 @@ import com.vikas.torrentplayer.R;
 import com.vikas.torrentplayer.api.models.DiscoverItem;
 import com.vikas.torrentplayer.api.models.SearchResult;
 import com.vikas.torrentplayer.api.models.TorrentItem;
+import com.vikas.torrentplayer.api.models.tmdb.TMDBEpisode;
+import com.vikas.torrentplayer.api.models.tmdb.TMDBSeasonSummary;
+import com.vikas.torrentplayer.api.models.tmdb.TMDBSeriesDetails;
 import com.vikas.torrentplayer.databinding.ActivityDetailBinding;
 import com.vikas.torrentplayer.torbox.TorBoxClient;
 import com.vikas.torrentplayer.torbox.TorBoxManager;
@@ -69,6 +72,10 @@ public class DetailActivity extends AppCompatActivity {
     private ActivityDetailBinding b;
     private DetailViewModel vm;
     private TorrentAdapter adapter;
+    private List<TMDBSeasonSummary> seasonChoices = new java.util.ArrayList<>();
+    private List<TMDBEpisode> episodeChoices = new java.util.ArrayList<>();
+    @Nullable private Integer selectedSeason;
+    @Nullable private Integer selectedEpisode;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -92,6 +99,9 @@ public class DetailActivity extends AppCompatActivity {
         }
 
         bindHeader(result);
+        b.episodeSection.setVisibility(result.isShow() ? View.VISIBLE : View.GONE);
+        b.btnSeason.setEnabled(false);
+        b.btnEpisode.setEnabled(false);
 
         adapter = new TorrentAdapter(new TorrentAdapter.OnTorrentAction() {
             @Override
@@ -129,7 +139,35 @@ public class DetailActivity extends AppCompatActivity {
         // Re-render the header whenever the VM swaps in a richer SearchResult —
         // this is how Discover→Detail picks up the backdrop after the search
         // fallback resolves.
-        vm.resultLive().observe(this, r -> { if (r != null) bindHeader(r); });
+        vm.resultLive().observe(this, r -> {
+            if (r == null) return;
+            bindHeader(r);
+            b.episodeSection.setVisibility(r.isShow() ? View.VISIBLE : View.GONE);
+        });
+        vm.seriesDetails().observe(this, this::renderSeriesDetails);
+        vm.seasons().observe(this, list -> {
+            seasonChoices = nullSafeSeasons(list);
+            b.btnSeason.setEnabled(!seasonChoices.isEmpty());
+        });
+        vm.episodes().observe(this, list -> {
+            episodeChoices = nullSafeEpisodes(list);
+            b.btnEpisode.setEnabled(selectedSeason != null && !episodeChoices.isEmpty());
+        });
+        vm.selectedSeason().observe(this, season -> {
+            selectedSeason = season;
+            updateSeasonButton();
+            b.btnEpisode.setEnabled(season != null && !episodeChoices.isEmpty());
+        });
+        vm.selectedEpisode().observe(this, episode -> {
+            selectedEpisode = episode;
+            updateEpisodeButton();
+        });
+        vm.episodeMetadataMessage().observe(this, this::renderEpisodeMessage);
+        vm.episodeLoading().observe(this,
+                loading -> b.episodeProgress.setVisibility(Boolean.TRUE.equals(loading)
+                        ? View.VISIBLE : View.GONE));
+        b.btnSeason.setOnClickListener(v -> showSeasonPicker());
+        b.btnEpisode.setOnClickListener(v -> showEpisodePicker());
         vm.load(result);
 
         // The AppBarLayout already declares fitsSystemWindows="true", so insets
@@ -233,6 +271,97 @@ public class DetailActivity extends AppCompatActivity {
                 .into(b.poster);
     }
 
+    private void renderSeriesDetails(@Nullable TMDBSeriesDetails details) {
+        if (details == null) return;
+        b.episodeSection.setVisibility(View.VISIBLE);
+        b.episodeSummary.setText(details.numberOfSeasons + " seasons · "
+                + details.numberOfEpisodes + " episodes");
+        b.episodeMessage.setText(R.string.detail_episodes_source);
+        b.episodeMessage.setVisibility(View.VISIBLE);
+    }
+
+    private void renderEpisodeMessage(@Nullable String message) {
+        if (message == null || message.trim().isEmpty()) {
+            if (b.episodeSummary.getText() == null || b.episodeSummary.getText().length() == 0) {
+                b.episodeMessage.setText(R.string.detail_episodes_source);
+            }
+            return;
+        }
+        b.episodeSection.setVisibility(View.VISIBLE);
+        b.episodeMessage.setText(message);
+        b.episodeMessage.setVisibility(View.VISIBLE);
+    }
+
+    private void showSeasonPicker() {
+        if (seasonChoices.isEmpty()) return;
+        CharSequence[] labels = new CharSequence[seasonChoices.size() + 1];
+        labels[0] = getString(R.string.detail_all_seasons);
+        int checked = 0;
+        for (int i = 0; i < seasonChoices.size(); i++) {
+            TMDBSeasonSummary s = seasonChoices.get(i);
+            labels[i + 1] = s.displayTitle();
+            if (selectedSeason != null && selectedSeason == s.seasonNumber) checked = i + 1;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.filter_season)
+                .setSingleChoiceItems(labels, checked, (d, which) -> {
+                    d.dismiss();
+                    if (which == 0) {
+                        vm.clearEpisodeFilter();
+                    } else {
+                        vm.selectSeason(seasonChoices.get(which - 1).seasonNumber);
+                    }
+                })
+                .show();
+    }
+
+    private void showEpisodePicker() {
+        if (selectedSeason == null || episodeChoices.isEmpty()) return;
+        CharSequence[] labels = new CharSequence[episodeChoices.size() + 1];
+        labels[0] = getString(R.string.detail_all_episodes);
+        int checked = 0;
+        for (int i = 0; i < episodeChoices.size(); i++) {
+            TMDBEpisode e = episodeChoices.get(i);
+            labels[i + 1] = e.displayTitle();
+            if (selectedEpisode != null && selectedEpisode == e.episodeNumber) checked = i + 1;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.filter_episode)
+                .setSingleChoiceItems(labels, checked, (d, which) -> {
+                    d.dismiss();
+                    vm.selectEpisode(which == 0 ? null : episodeChoices.get(which - 1).episodeNumber);
+                })
+                .show();
+    }
+
+    private void updateSeasonButton() {
+        if (selectedSeason == null) {
+            b.btnSeason.setText(R.string.detail_all_seasons);
+            return;
+        }
+        for (TMDBSeasonSummary s : seasonChoices) {
+            if (s.seasonNumber == selectedSeason) {
+                b.btnSeason.setText(s.displayTitle());
+                return;
+            }
+        }
+        b.btnSeason.setText("Season " + selectedSeason);
+    }
+
+    private void updateEpisodeButton() {
+        if (selectedEpisode == null) {
+            b.btnEpisode.setText(R.string.detail_all_episodes);
+            return;
+        }
+        for (TMDBEpisode e : episodeChoices) {
+            if (e.episodeNumber == selectedEpisode) {
+                b.btnEpisode.setText(e.displayTitle());
+                return;
+            }
+        }
+        b.btnEpisode.setText("Episode " + selectedEpisode);
+    }
+
     private void renderState(DetailViewModel.UiState state) {
         boolean loading = state == DetailViewModel.UiState.LOADING;
         b.progress.setVisibility(loading ? View.VISIBLE : View.GONE);
@@ -250,6 +379,14 @@ public class DetailActivity extends AppCompatActivity {
     }
 
     private static List<TorrentItem> nullSafe(List<TorrentItem> in) {
+        return in == null ? new java.util.ArrayList<>() : in;
+    }
+
+    private static List<TMDBSeasonSummary> nullSafeSeasons(List<TMDBSeasonSummary> in) {
+        return in == null ? new java.util.ArrayList<>() : in;
+    }
+
+    private static List<TMDBEpisode> nullSafeEpisodes(List<TMDBEpisode> in) {
         return in == null ? new java.util.ArrayList<>() : in;
     }
 }

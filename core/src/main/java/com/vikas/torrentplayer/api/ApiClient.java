@@ -21,9 +21,11 @@ public final class ApiClient {
 
     public static final String BASE_URL = "https://torrentclaw.com/";
     public static final String GITHUB_BASE_URL = "https://api.github.com/";
+    public static final String TMDB_BASE_URL = "https://api.themoviedb.org/3/";
 
     private static volatile TorrentClawApi torrentClaw;
     private static volatile GitHubApiService github;
+    private static volatile TMDBApiService tmdb;
 
     private ApiClient() {}
 
@@ -47,6 +49,17 @@ public final class ApiClient {
             }
         }
         return github;
+    }
+
+    public static TMDBApiService tmdb() {
+        if (tmdb == null) {
+            synchronized (ApiClient.class) {
+                if (tmdb == null) {
+                    tmdb = buildRetrofit(TMDB_BASE_URL).create(TMDBApiService.class);
+                }
+            }
+        }
+        return tmdb;
     }
 
     private static Retrofit buildRetrofit(String baseUrl) {

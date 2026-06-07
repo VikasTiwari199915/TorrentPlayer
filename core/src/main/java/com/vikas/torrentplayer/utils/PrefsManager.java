@@ -23,6 +23,7 @@ public final class PrefsManager {
     public static final String KEY_SAVE_VOLUME_PATH = "pref_save_volume_path";
     public static final String KEY_TV_BACKDROP = "pref_tv_backdrop";
     public static final String KEY_TORBOX_KEY = "pref_torbox_key";
+    public static final String KEY_TMDB_CREDENTIAL = "pref_tmdb_credential";
 
     private final SharedPreferences sp;
 
@@ -99,5 +100,21 @@ public final class PrefsManager {
     public boolean hasTorBoxKey() {
         String k = getTorBoxKey();
         return k != null && !k.isEmpty();
+    }
+
+    /** TMDB v4 read token or v3 API key. Tokens contain dots and are sent as
+     *  Bearer auth; API keys are sent as the api_key query parameter. */
+    public String getTmdbCredential() {
+        return sp.getString(KEY_TMDB_CREDENTIAL, "");
+    }
+
+    public void setTmdbCredential(String credential) {
+        sp.edit().putString(KEY_TMDB_CREDENTIAL,
+                credential == null ? "" : credential.trim()).apply();
+    }
+
+    public boolean hasTmdbCredential() {
+        String c = getTmdbCredential();
+        return c != null && !c.isEmpty();
     }
 }
