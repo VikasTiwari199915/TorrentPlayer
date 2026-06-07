@@ -4,6 +4,7 @@ import com.google.gson.annotations.SerializedName;
 
 import java.io.Serializable;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Mirrors a single entry from {@code SearchResult.torrents}. Field shape follows
@@ -119,6 +120,23 @@ public class TorrentItem implements Serializable {
         if (verified != null && verified) return true;
         return "success".equalsIgnoreCase(scanStatus)
                 && "clean".equalsIgnoreCase(threatLevel);
+    }
+
+    /**
+     * Human title for download lists. Show torrents are otherwise ambiguous in
+     * Downloads because every episode would use only the series title.
+     */
+    public String downloadTitle(SearchResult parent) {
+        String base = parent != null && parent.title != null && !parent.title.isEmpty()
+                ? parent.title
+                : (rawTitle != null && !rawTitle.isEmpty() ? rawTitle : "Unknown");
+        if (parent == null || !parent.isShow() || season == null || season <= 0) {
+            return base;
+        }
+        String suffix = episode != null && episode > 0
+                ? String.format(Locale.US, "-S%02dE%02d", season, episode)
+                : String.format(Locale.US, "-S%02d", season);
+        return base.endsWith(suffix) ? base : base + suffix;
     }
 
     /** "1920×800" style resolution, or null if videoInfo missing. */

@@ -620,7 +620,7 @@ public class TorrentManager {
         if (handle == null) {
             handle = new DownloadHandle(
                     hash,
-                    parent != null ? parent.title : (item.rawTitle != null ? item.rawTitle : "Unknown"),
+                    item.downloadTitle(parent),
                     parent != null ? parent.posterUrl : null,
                     item.quality,
                     item.sizeBytes,

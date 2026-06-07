@@ -10,7 +10,8 @@
     <!-- Discover -->
     <string name="section_trending">Trending Today</string>
     <string name="section_popular">Popular Now</string>
-    <string name="section_streaming_top">Top on Streaming</string>
+    <string name="section_streaming_top_movies">Top Streaming Movies</string>
+    <string name="section_streaming_top_shows">Top Streaming Shows</string>
     <string name="section_recent">Recently Added</string>
 
     <!-- Search -->

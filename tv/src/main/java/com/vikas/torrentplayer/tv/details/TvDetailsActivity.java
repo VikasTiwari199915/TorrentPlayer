@@ -505,8 +505,7 @@ public class TvDetailsActivity extends FragmentActivity {
                     android.widget.Toast.LENGTH_LONG).show();
             return;
         }
-        final String title = item != null && item.title != null ? item.title
-                : (t.rawTitle != null ? t.rawTitle : "Download");
+        final String title = t.downloadTitle(result);
         TorBoxManager.get().init(getApplicationContext());
 
         TextView msg = new TextView(this);

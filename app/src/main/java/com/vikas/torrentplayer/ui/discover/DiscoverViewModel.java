@@ -25,9 +25,8 @@ import retrofit2.Callback;
 import retrofit2.Response;
 
 /**
- * State for the Discover screen. Loads four independent sections (trending,
- * popular, recent, streaming-top) and exposes each as its own LiveData so the
- * UI can show partial results as they arrive.
+ * State for the Discover screen. Loads independent sections and exposes each
+ * as its own LiveData so the UI can show partial results as they arrive.
  */
 public class DiscoverViewModel extends AndroidViewModel {
 
@@ -43,12 +42,14 @@ public class DiscoverViewModel extends AndroidViewModel {
     private final MutableLiveData<List<DiscoverItem>> trending = new MutableLiveData<>(Collections.emptyList());
     private final MutableLiveData<List<DiscoverItem>> popular = new MutableLiveData<>(Collections.emptyList());
     private final MutableLiveData<List<DiscoverItem>> recent = new MutableLiveData<>(Collections.emptyList());
-    private final MutableLiveData<List<DiscoverItem>> streamingTop = new MutableLiveData<>(Collections.emptyList());
+    private final MutableLiveData<List<DiscoverItem>> streamingTopMovies = new MutableLiveData<>(Collections.emptyList());
+    private final MutableLiveData<List<DiscoverItem>> streamingTopShows = new MutableLiveData<>(Collections.emptyList());
 
     private final MutableLiveData<SectionState> trendingState = new MutableLiveData<>(SectionState.LOADING);
     private final MutableLiveData<SectionState> popularState = new MutableLiveData<>(SectionState.LOADING);
     private final MutableLiveData<SectionState> recentState = new MutableLiveData<>(SectionState.LOADING);
-    private final MutableLiveData<SectionState> streamingTopState = new MutableLiveData<>(SectionState.LOADING);
+    private final MutableLiveData<SectionState> streamingTopMoviesState = new MutableLiveData<>(SectionState.LOADING);
+    private final MutableLiveData<SectionState> streamingTopShowsState = new MutableLiveData<>(SectionState.LOADING);
 
     private final MutableLiveData<String> selectedService = new MutableLiveData<>("netflix");
 
@@ -63,12 +64,14 @@ public class DiscoverViewModel extends AndroidViewModel {
     public LiveData<List<DiscoverItem>> trending() { return trending; }
     public LiveData<List<DiscoverItem>> popular() { return popular; }
     public LiveData<List<DiscoverItem>> recent() { return recent; }
-    public LiveData<List<DiscoverItem>> streamingTop() { return streamingTop; }
+    public LiveData<List<DiscoverItem>> streamingTopMovies() { return streamingTopMovies; }
+    public LiveData<List<DiscoverItem>> streamingTopShows() { return streamingTopShows; }
 
     public LiveData<SectionState> trendingState() { return trendingState; }
     public LiveData<SectionState> popularState() { return popularState; }
     public LiveData<SectionState> recentState() { return recentState; }
-    public LiveData<SectionState> streamingTopState() { return streamingTopState; }
+    public LiveData<SectionState> streamingTopMoviesState() { return streamingTopMoviesState; }
+    public LiveData<SectionState> streamingTopShowsState() { return streamingTopShowsState; }
 
     public LiveData<String> selectedService() { return selectedService; }
 
@@ -82,20 +85,23 @@ public class DiscoverViewModel extends AndroidViewModel {
             trendingState.setValue(SectionState.ERROR);
             popularState.setValue(SectionState.ERROR);
             recentState.setValue(SectionState.ERROR);
-            streamingTopState.setValue(SectionState.ERROR);
+            streamingTopMoviesState.setValue(SectionState.ERROR);
+            streamingTopShowsState.setValue(SectionState.ERROR);
             return;
         }
         loadTrending();
         loadPopular();
         loadRecent();
-        loadStreamingTop(currentService());
+        loadStreamingTop(currentService(), "movie", streamingTopMovies, streamingTopMoviesState);
+        loadStreamingTop(currentService(), "series", streamingTopShows, streamingTopShowsState);
     }
 
     /** Switch service for the streaming-top section and reload that section. */
     public void selectService(String service) {
         if (service == null || service.equals(currentService())) return;
         selectedService.setValue(service);
-        loadStreamingTop(service);
+        loadStreamingTop(service, "movie", streamingTopMovies, streamingTopMoviesState);
+        loadStreamingTop(service, "series", streamingTopShows, streamingTopShowsState);
     }
 
     public String currentService() {
@@ -166,11 +172,15 @@ public class DiscoverViewModel extends AndroidViewModel {
         });
     }
 
-    private void loadStreamingTop(String service) {
-        streamingTopState.setValue(SectionState.LOADING);
+    private void loadStreamingTop(String service,
+                                  String showType,
+                                  MutableLiveData<List<DiscoverItem>> target,
+                                  MutableLiveData<SectionState> targetState) {
+        targetState.setValue(SectionState.LOADING);
         String key = prefs.getApiKey();
-        // "series" rather than "show" for this endpoint
-        Call<List<DiscoverItem>> c = api.getStreamingTop(ApiClient.bearer(key), service, "US", "movie", key);
+        // This endpoint uses "series" rather than "show".
+        Call<List<DiscoverItem>> c = api.getStreamingTop(
+                ApiClient.bearer(key), service, "US", showType, key);
         track(c);
         c.enqueue(new Callback<List<DiscoverItem>>() {
             @Override
@@ -179,13 +189,13 @@ public class DiscoverViewModel extends AndroidViewModel {
                 List<DiscoverItem> items = response.isSuccessful() && response.body() != null
                         ? response.body()
                         : Collections.<DiscoverItem>emptyList();
-                streamingTop.setValue(items);
-                streamingTopState.setValue(items.isEmpty() ? SectionState.EMPTY : SectionState.SUCCESS);
+                target.setValue(items);
+                targetState.setValue(items.isEmpty() ? SectionState.EMPTY : SectionState.SUCCESS);
             }
             @Override public void onFailure(@NonNull Call<List<DiscoverItem>> call, @NonNull Throwable t) {
                 if (call.isCanceled()) return;
-                Log.e(TAG, "streaming-top failed", t);
-                streamingTopState.setValue(SectionState.ERROR);
+                Log.e(TAG, "streaming-top " + showType + " failed", t);
+                targetState.setValue(SectionState.ERROR);
             }
         });
     }

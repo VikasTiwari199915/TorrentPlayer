@@ -33,7 +33,8 @@ public class DiscoverFragment extends Fragment {
     private PosterAdapter trendingAdapter;
     private PosterAdapter popularAdapter;
     private PosterAdapter recentAdapter;
-    private PosterAdapter streamingAdapter;
+    private PosterAdapter streamingMoviesAdapter;
+    private PosterAdapter streamingShowsAdapter;
 
     @Nullable
     @Override
@@ -52,12 +53,14 @@ public class DiscoverFragment extends Fragment {
         trendingAdapter = new PosterAdapter(onClick, /*showRank=*/false);
         popularAdapter = new PosterAdapter(onClick, false);
         recentAdapter = new PosterAdapter(onClick, false);
-        streamingAdapter = new PosterAdapter(onClick, /*showRank=*/true);
+        streamingMoviesAdapter = new PosterAdapter(onClick, /*showRank=*/true);
+        streamingShowsAdapter = new PosterAdapter(onClick, /*showRank=*/true);
 
         wireCarousel(b.trendingRecycler, trendingAdapter);
         wireCarousel(b.popularRecycler, popularAdapter);
         wireCarousel(b.recentRecycler, recentAdapter);
-        wireCarousel(b.streamingRecycler, streamingAdapter);
+        wireCarousel(b.streamingMoviesRecycler, streamingMoviesAdapter);
+        wireCarousel(b.streamingShowsRecycler, streamingShowsAdapter);
 
         // Streaming service chip selection — read android:tag from the chip
         b.serviceChips.setOnCheckedStateChangeListener((group, checkedIds) -> {
@@ -82,7 +85,8 @@ public class DiscoverFragment extends Fragment {
         observe(vm.trending(), trendingAdapter, b.trendingProgress);
         observe(vm.popular(), popularAdapter, b.popularProgress);
         observe(vm.recent(), recentAdapter, b.recentProgress);
-        observe(vm.streamingTop(), streamingAdapter, b.streamingProgress);
+        observe(vm.streamingTopMovies(), streamingMoviesAdapter, b.streamingMoviesProgress);
+        observe(vm.streamingTopShows(), streamingShowsAdapter, b.streamingShowsProgress);
 
         // Wire spinner visibility to state
         vm.trendingState().observe(getViewLifecycleOwner(), s ->
@@ -91,8 +95,10 @@ public class DiscoverFragment extends Fragment {
                 b.popularProgress.setVisibility(s == DiscoverViewModel.SectionState.LOADING ? View.VISIBLE : View.GONE));
         vm.recentState().observe(getViewLifecycleOwner(), s ->
                 b.recentProgress.setVisibility(s == DiscoverViewModel.SectionState.LOADING ? View.VISIBLE : View.GONE));
-        vm.streamingTopState().observe(getViewLifecycleOwner(), s ->
-                b.streamingProgress.setVisibility(s == DiscoverViewModel.SectionState.LOADING ? View.VISIBLE : View.GONE));
+        vm.streamingTopMoviesState().observe(getViewLifecycleOwner(), s ->
+                b.streamingMoviesProgress.setVisibility(s == DiscoverViewModel.SectionState.LOADING ? View.VISIBLE : View.GONE));
+        vm.streamingTopShowsState().observe(getViewLifecycleOwner(), s ->
+                b.streamingShowsProgress.setVisibility(s == DiscoverViewModel.SectionState.LOADING ? View.VISIBLE : View.GONE));
 
         // Insets handled by android:fitsSystemWindows on the AppBarLayout —
         // manually padding the toolbar here would double up and clip the title.

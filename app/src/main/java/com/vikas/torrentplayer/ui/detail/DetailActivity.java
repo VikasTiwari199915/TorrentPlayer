@@ -191,8 +191,7 @@ public class DetailActivity extends AppCompatActivity {
                     Toast.LENGTH_LONG).show();
             return;
         }
-        final String title = vm != null && vm.result() != null && vm.result().title != null
-                ? vm.result().title : (item.rawTitle != null ? item.rawTitle : "Download");
+        final String title = item.downloadTitle(vm != null ? vm.result() : null);
         TorBoxManager.get().init(getApplicationContext());
 
         androidx.appcompat.app.AlertDialog dlg = new MaterialAlertDialogBuilder(this)

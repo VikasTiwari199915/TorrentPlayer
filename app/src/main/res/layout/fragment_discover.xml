@@ -110,10 +110,10 @@
                     android:overScrollMode="never"
                     tools:listitem="@layout/item_discover_poster" />
 
-                <!-- Top on streaming -->
+                <!-- Top streaming movies -->
                 <TextView
                     style="@style/Discover.SectionTitle"
-                    android:text="@string/section_streaming_top" />
+                    android:text="@string/section_streaming_top_movies" />
 
                 <HorizontalScrollView
                     android:layout_width="match_parent"
@@ -175,7 +175,7 @@
                 </HorizontalScrollView>
 
                 <com.google.android.material.progressindicator.LinearProgressIndicator
-                    android:id="@+id/streaming_progress"
+                    android:id="@+id/streaming_movies_progress"
                     style="@style/Widget.Material3.LinearProgressIndicator"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -184,7 +184,31 @@
                     android:visibility="gone" />
 
                 <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/streaming_recycler"
+                    android:id="@+id/streaming_movies_recycler"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:clipToPadding="false"
+                    android:paddingHorizontal="16dp"
+                    android:paddingVertical="4dp"
+                    android:overScrollMode="never"
+                    tools:listitem="@layout/item_discover_poster" />
+
+                <!-- Top streaming shows -->
+                <TextView
+                    style="@style/Discover.SectionTitle"
+                    android:text="@string/section_streaming_top_shows" />
+
+                <com.google.android.material.progressindicator.LinearProgressIndicator
+                    android:id="@+id/streaming_shows_progress"
+                    style="@style/Widget.Material3.LinearProgressIndicator"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:indeterminate="true"
+                    android:layout_marginHorizontal="16dp"
+                    android:visibility="gone" />
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/streaming_shows_recycler"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:clipToPadding="false"
