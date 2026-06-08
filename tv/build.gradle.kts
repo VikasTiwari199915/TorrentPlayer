@@ -99,6 +99,8 @@ dependencies {
 
     // Image loading
     implementation(libs.glide)
+    implementation(libs.glide.okhttp3)
+    annotationProcessor(libs.glide.compiler)
 
     // ExoPlayer UI (leanback variant has a TV-style controller)
     implementation(libs.media3.ui)

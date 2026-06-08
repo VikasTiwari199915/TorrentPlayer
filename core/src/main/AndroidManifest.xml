@@ -13,7 +13,7 @@
 
     <application>
         <service
-            android:name=".service.TorrentDownloadService"
+            android:name="com.vikas.torrentplayer.service.TorrentDownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
     </application>
