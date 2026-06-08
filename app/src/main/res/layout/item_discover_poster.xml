@@ -31,7 +31,7 @@
             android:layout_height="wrap_content"
             android:layout_gravity="top|start"
             android:layout_margin="6dp"
-            android:fontFamily="@font/bungee_outline"
+            android:fontFamily="@font/train_one"
             android:gravity="center"
             android:shadowColor="#000000"
             android:shadowDx="4"
