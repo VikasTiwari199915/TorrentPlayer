@@ -39,6 +39,7 @@ import org.libtorrent4j.TorrentStatus;
 import org.libtorrent4j.alerts.Alert;
 import org.libtorrent4j.alerts.AlertType;
 import org.libtorrent4j.alerts.SaveResumeDataAlert;
+import org.libtorrent4j.alerts.TorrentCheckedAlert;
 import org.libtorrent4j.alerts.TorrentErrorAlert;
 import org.libtorrent4j.alerts.TorrentFinishedAlert;
 import org.libtorrent4j.swig.torrent_flags_t;
@@ -114,6 +115,7 @@ public class TorrentManager {
 
     private final Map<String, DownloadHandle> handles = new LinkedHashMap<>();
     private final Map<String, TorrentRecord> records = new HashMap<>();
+    private final Set<String> rechecking = Collections.synchronizedSet(new LinkedHashSet<>());
 
     private final MutableLiveData<List<DownloadHandle>> allDownloads = new MutableLiveData<>(new ArrayList<>());
     private final MutableLiveData<DownloadHandle> active = new MutableLiveData<>(null);
@@ -817,14 +819,17 @@ public class TorrentManager {
      *  are marked incomplete and downloaded again when the torrent resumes. */
     public void forceRecheck(@Nullable String infoHash) {
         if (infoHash == null || infoHash.isEmpty()) return;
-        DownloadHandle h = handles.get(infoHash);
+        String key = infoHash.toLowerCase(Locale.US);
+        DownloadHandle h = handles.get(key);
+        rechecking.add(key);
         if (h != null) {
             h.errorMessage.postValue(null);
             h.state.postValue(DownloadHandle.State.STARTING);
         }
         io.execute(() -> {
-            TorrentHandle th = handleFor(infoHash);
+            TorrentHandle th = handleFor(key);
             if (th == null) {
+                rechecking.remove(key);
                 if (h != null) {
                     h.errorMessage.postValue("Torrent is not active yet");
                     h.state.postValue(DownloadHandle.State.ERROR);
@@ -832,11 +837,13 @@ public class TorrentManager {
                 return;
             }
             try {
+                try { th.setFlags(TorrentFlags.AUTO_MANAGED); }
+                catch (Throwable t) { Log.w(TAG, "setFlags failed", t); }
                 th.forceRecheck();
                 th.resume();
-                requestMissingVideoPieces(th, records.get(infoHash));
                 if (h != null) persistAsync(h);
             } catch (Throwable t) {
+                rechecking.remove(key);
                 Log.e(TAG, "force recheck failed for " + infoHash, t);
                 if (h != null) {
                     h.errorMessage.postValue(t.getMessage() != null
@@ -848,11 +855,40 @@ public class TorrentManager {
     }
 
     @MainThread
+    public void restartDownload(@Nullable String infoHash) {
+        if (infoHash == null || infoHash.isEmpty()) return;
+        String key = infoHash.toLowerCase(Locale.US);
+        DownloadHandle h = handles.get(key);
+        TorrentRecord rec = records.get(key);
+        if (h == null || rec == null || rec.hash == null || session == null) return;
+
+        h.errorMessage.setValue(null);
+        h.state.setValue(DownloadHandle.State.BUFFERING);
+        DownloadHandle.Progress p = h.progress.getValue();
+        if (p != null) {
+            h.progress.setValue(new DownloadHandle.Progress(
+                    Math.min(99, p.percent), 0, p.seeders, p.bufferProgress));
+        }
+        persistAsync(h);
+
+        final Sha1Hash hash = rec.hash;
+        io.execute(() -> {
+            TorrentHandle th = session.find(hash);
+            if (th == null || !th.isValid()) return;
+            requestMissingWantedPieces(th, rec.info);
+            try { th.setFlags(TorrentFlags.AUTO_MANAGED); }
+            catch (Throwable t) { Log.w(TAG, "setFlags failed", t); }
+            th.resume();
+        });
+    }
+
+    @MainThread
     public void setFilePriority(@Nullable String infoHash, @NonNull List<Integer> fileIndices,
                                 boolean enable) {
         if (infoHash == null || infoHash.isEmpty() || fileIndices.isEmpty()) return;
-        DownloadHandle h = handles.get(infoHash);
-        TorrentRecord rec = records.get(infoHash);
+        String key = infoHash.toLowerCase(Locale.US);
+        DownloadHandle h = handles.get(key);
+        TorrentRecord rec = records.get(key);
         if (h == null || rec == null || rec.hash == null || rec.info == null || session == null) return;
 
         if (enable) {
@@ -1296,6 +1332,37 @@ public class TorrentManager {
         }
     }
 
+    private int countMissingWantedPieces(TorrentHandle th, @Nullable TorrentInfo ti) {
+        if (th == null || !th.isValid() || ti == null || !ti.isValid()) return 0;
+        int total = ti.numPieces();
+        int missing = 0;
+        for (int i = 0; i < total; i++) {
+            try {
+                if (!th.havePiece(i) && th.piecePriority(i) != Priority.IGNORE) missing++;
+            } catch (Throwable ignored) {}
+        }
+        return missing;
+    }
+
+    private void requestMissingWantedPieces(TorrentHandle th, @Nullable TorrentInfo ti) {
+        if (th == null || !th.isValid() || ti == null || !ti.isValid()) return;
+        int total = ti.numPieces();
+        int deadlineMs = 0;
+        for (int i = 0; i < total; i++) {
+            try {
+                if (!th.havePiece(i) && th.piecePriority(i) != Priority.IGNORE) {
+                    th.piecePriority(i, Priority.DEFAULT);
+                    if (deadlineMs < 20_000) {
+                        th.setPieceDeadline(i, deadlineMs);
+                        deadlineMs += 200;
+                    }
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "request missing wanted piece " + i + " failed", t);
+            }
+        }
+    }
+
     private void requestFilePieces(TorrentHandle th, TorrentInfo ti, List<Integer> fileIndices) {
         if (th == null || !th.isValid() || ti == null || fileIndices == null) return;
         FileStorage files = ti.files();
@@ -1380,6 +1447,7 @@ public class TorrentManager {
     private final int[] WANTED_ALERTS = new int[] {
             AlertType.STATE_UPDATE.swig(),
             AlertType.TORRENT_FINISHED.swig(),
+            AlertType.TORRENT_CHECKED.swig(),
             AlertType.TORRENT_ERROR.swig(),
             AlertType.SAVE_RESUME_DATA.swig(),
     };
@@ -1410,6 +1478,15 @@ public class TorrentManager {
                             final String hex = ((TorrentFinishedAlert) alert)
                                     .handle().infoHash().toHex();
                             main.post(() -> onFinishedByHex(hex));
+                        } catch (Throwable ignored) {}
+                    }
+                    break;
+                case TORRENT_CHECKED:
+                    if (alert instanceof TorrentCheckedAlert) {
+                        try {
+                            final String hex = ((TorrentCheckedAlert) alert)
+                                    .handle().infoHash().toHex();
+                            main.post(() -> onCheckedByHex(hex));
                         } catch (Throwable ignored) {}
                     }
                     break;
@@ -1452,9 +1529,48 @@ public class TorrentManager {
         }
     };
 
+    private void onCheckedByHex(String hex) {
+        String key = hex == null ? "" : hex.toLowerCase(Locale.US);
+        rechecking.remove(key);
+        DownloadHandle dh = handles.get(key);
+        TorrentRecord rec = records.get(key);
+        if (rec == null || rec.hash == null || session == null) return;
+
+        io.execute(() -> {
+            TorrentHandle th = session.find(rec.hash);
+            if (th == null || !th.isValid()) return;
+            int missingWanted = countMissingWantedPieces(th, rec.info);
+            if (missingWanted > 0) {
+                requestMissingWantedPieces(th, rec.info);
+                try { th.setFlags(TorrentFlags.AUTO_MANAGED); }
+                catch (Throwable t) { Log.w(TAG, "setFlags failed", t); }
+                th.resume();
+                if (dh != null) {
+                    main.post(() -> {
+                        dh.state.setValue(DownloadHandle.State.BUFFERING);
+                        DownloadHandle.Progress p = dh.progress.getValue();
+                        if (p != null) {
+                            dh.progress.setValue(new DownloadHandle.Progress(
+                                    Math.min(99, p.percent), 0, p.seeders, p.bufferProgress));
+                        }
+                        persistAsync(dh);
+                    });
+                }
+            } else if (dh != null) {
+                main.post(() -> {
+                    dh.state.setValue(DownloadHandle.State.FINISHED);
+                    persistAsync(dh);
+                    stopSeedingFor(rec);
+                });
+            }
+        });
+    }
+
     private void onFinishedByHex(String hex) {
-        DownloadHandle dh = handles.get(hex);
-        TorrentRecord rec = records.get(hex);
+        String key = hex == null ? "" : hex.toLowerCase(Locale.US);
+        if (rechecking.contains(key)) return;
+        DownloadHandle dh = handles.get(key);
+        TorrentRecord rec = records.get(key);
         if (dh != null) {
             dh.state.setValue(DownloadHandle.State.FINISHED);
             persistAsync(dh);
@@ -1498,6 +1614,9 @@ public class TorrentManager {
 
         TorrentStatus status = th.status();
         final int pct = Math.max(0, Math.min(100, Math.round(status.progress() * 100)));
+        final int missingWanted = (pct >= 99 || rechecking.contains(key))
+                ? countMissingWantedPieces(th, rec.info)
+                : 0;
         final long rawSpeed = status.downloadRate();
         final int seeders = status.numSeeds();
         final int bufferPct = computeHeadBuffer(rec, th);
@@ -1511,13 +1630,13 @@ public class TorrentManager {
                 && rec.videoFilePath.exists() && rec.videoFilePath.length() > 0;
 
         main.post(() -> applyProgress(key, rec, pct, rawSpeed, seeders, bufferPct,
-                headReady, fileReady));
+                headReady, fileReady, missingWanted));
     }
 
     @MainThread
     private void applyProgress(String key, TorrentRecord rec, int pct, long rawSpeed,
                                int seeders, int bufferPct, boolean headReady,
-                               boolean fileReady) {
+                               boolean fileReady, int missingWanted) {
         DownloadHandle h = handles.get(key);
         if (h == null) return;
 
@@ -1526,7 +1645,7 @@ public class TorrentManager {
         DownloadHandle.State curState = h.state.getValue();
         boolean stoppedish = curState == DownloadHandle.State.PAUSED
                 || curState == DownloadHandle.State.FINISHED
-                || pct >= 100;
+                || (pct >= 100 && missingWanted == 0 && !rechecking.contains(key));
         long speed = stoppedish ? 0 : rawSpeed;
 
         h.progress.setValue(new DownloadHandle.Progress(pct, speed, seeders, bufferPct));
@@ -1552,13 +1671,17 @@ public class TorrentManager {
             });
         }
 
-        if (pct >= 100 && h.state.getValue() != DownloadHandle.State.FINISHED) {
+        if (pct >= 100 && missingWanted == 0 && !rechecking.contains(key)
+                && h.state.getValue() != DownloadHandle.State.FINISHED) {
             h.state.setValue(DownloadHandle.State.FINISHED);
             // Stop the torrent completely so we don't keep using bandwidth /
             // CPU / wakelock on a finished item.
             stopSeedingFor(rec);
             // Surface the file to MediaScanner so gallery / players see it.
             if (rec.videoFilePath != null) notifyMediaScanner(rec.videoFilePath);
+            persistAsync(h);
+        } else if (missingWanted > 0 && h.state.getValue() == DownloadHandle.State.FINISHED) {
+            h.state.setValue(DownloadHandle.State.BUFFERING);
             persistAsync(h);
         }
     }

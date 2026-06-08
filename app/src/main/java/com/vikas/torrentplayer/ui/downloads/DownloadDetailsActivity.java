@@ -16,6 +16,7 @@ import androidx.viewpager2.adapter.FragmentStateAdapter;
 import com.google.android.material.tabs.TabLayoutMediator;
 import com.vikas.torrentplayer.R;
 import com.vikas.torrentplayer.databinding.ActivityDownloadDetailsBinding;
+import com.vikas.torrentplayer.service.TorrentDownloadService;
 import com.vikas.torrentplayer.torrent.DownloadHandle;
 import com.vikas.torrentplayer.torrent.TorrentManager;
 
@@ -72,8 +73,14 @@ public class DownloadDetailsActivity extends AppCompatActivity {
     @Override
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         if (item.getItemId() == R.id.action_verify_pieces) {
+            TorrentDownloadService.start(this);
             TorrentManager.get().forceRecheck(infoHash);
             Toast.makeText(this, R.string.action_verify_pieces, Toast.LENGTH_SHORT).show();
+            return true;
+        } else if (item.getItemId() == R.id.action_restart_download) {
+            TorrentDownloadService.start(this);
+            TorrentManager.get().restartDownload(infoHash);
+            Toast.makeText(this, R.string.action_restart_download, Toast.LENGTH_SHORT).show();
             return true;
         }
         return super.onOptionsItemSelected(item);

@@ -73,6 +73,7 @@
     <string name="action_remove">Remove</string>
     <string name="action_play_now">Play Now</string>
     <string name="action_verify_pieces">Verify pieces</string>
+    <string name="action_restart_download">Restart download</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>

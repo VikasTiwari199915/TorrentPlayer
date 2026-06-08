@@ -7,4 +7,9 @@
         android:icon="@drawable/rounded_verified_24"
         android:title="@string/action_verify_pieces"
         app:showAsAction="ifRoom" />
+    <item
+        android:id="@+id/action_restart_download"
+        android:icon="@drawable/rounded_play_arrow_24"
+        android:title="@string/action_restart_download"
+        app:showAsAction="never" />
 </menu>

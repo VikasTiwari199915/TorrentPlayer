@@ -13,6 +13,7 @@ import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
 import com.vikas.torrentplayer.databinding.FragmentDetailsPiecesBinding;
+import com.vikas.torrentplayer.service.TorrentDownloadService;
 import com.vikas.torrentplayer.torrent.TorrentManager;
 import com.vikas.torrentplayer.utils.FormatUtils;
 
@@ -62,8 +63,14 @@ public class DetailsPiecesFragment extends Fragment {
         super.onViewCreated(view, savedInstanceState);
         hash = requireArguments().getString(ARG_HASH);
         b.verifyPieces.setOnClickListener(v -> {
+            TorrentDownloadService.start(requireContext());
             TorrentManager.get().forceRecheck(hash);
             Toast.makeText(requireContext(), "Verifying torrent pieces…", Toast.LENGTH_SHORT).show();
+        });
+        b.restartDownload.setOnClickListener(v -> {
+            TorrentDownloadService.start(requireContext());
+            TorrentManager.get().restartDownload(hash);
+            Toast.makeText(requireContext(), "Restarting download…", Toast.LENGTH_SHORT).show();
         });
         refresh();
     }

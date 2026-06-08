@@ -52,5 +52,14 @@
             android:layout_marginTop="16dp"
             android:text="@string/action_verify_pieces"
             app:icon="@drawable/rounded_verified_24" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/restart_download"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/action_restart_download"
+            app:icon="@drawable/rounded_play_arrow_24" />
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>
