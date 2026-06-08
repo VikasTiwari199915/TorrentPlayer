@@ -9,10 +9,12 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.util.Log;
 
 import androidx.annotation.DrawableRes;
@@ -64,6 +66,8 @@ public class TorrentDownloadService extends Service {
     }
 
     private static volatile Config sConfig;
+    @Nullable private PowerManager.WakeLock wakeLock;
+    @Nullable private WifiManager.WifiLock wifiLock;
 
     /** Host apps call this from {@code Application.onCreate()} before
      *  {@link #start(Context)} so the notification has valid content. */
@@ -95,12 +99,7 @@ public class TorrentDownloadService extends Service {
         super.onCreate();
         ensureChannel();
 
-        Notification n = buildNotification(idleText(), 0, false);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE /* 34 */) {
-            startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
-        } else {
-            startForeground(NOTIFICATION_ID, n);
-        }
+        postForeground(buildNotification(idleText(), 0, false));
 
         TorrentManager.get().init(getApplicationContext());
         TorrentManager.get().downloads().observeForever(listObserver);
@@ -109,6 +108,7 @@ public class TorrentDownloadService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        updateForCurrentDownloads(TorrentManager.get().downloads().getValue());
         return START_STICKY;
     }
 
@@ -135,6 +135,7 @@ public class TorrentDownloadService extends Service {
     public void onDestroy() {
         refreshHandler.removeCallbacks(refreshTick);
         TorrentManager.get().downloads().removeObserver(listObserver);
+        updatePowerLocks(false);
         super.onDestroy();
     }
 
@@ -170,6 +171,7 @@ public class TorrentDownloadService extends Service {
                 }
             }
         }
+        updatePowerLocks(active > 0);
 
         String text;
         boolean indeterminate;
@@ -191,9 +193,7 @@ public class TorrentDownloadService extends Service {
             progress = avg;
         }
 
-        Notification n = buildNotification(text, progress, indeterminate);
-        NotificationManager nm = getSystemService(NotificationManager.class);
-        if (nm != null) nm.notify(NOTIFICATION_ID, n);
+        postForeground(buildNotification(text, progress, indeterminate));
     }
 
     private Notification buildNotification(String text, int progress, boolean indeterminate) {
@@ -213,14 +213,74 @@ public class TorrentDownloadService extends Service {
                 .setSmallIcon(icon)
                 .setContentTitle(title)
                 .setContentText(text)
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
+                .setSilent(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
                 .setCategory(NotificationCompat.CATEGORY_PROGRESS);
         if (pi != null) b.setContentIntent(pi);
         if (progress > 0 || indeterminate) b.setProgress(100, progress, indeterminate);
 
         return b.build();
+    }
+
+    private void postForeground(Notification notification) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE /* 34 */) {
+            startForeground(NOTIFICATION_ID, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+        } else {
+            startForeground(NOTIFICATION_ID, notification);
+        }
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm != null) nm.notify(NOTIFICATION_ID, notification);
+    }
+
+    private void updatePowerLocks(boolean active) {
+        if (active) {
+            if (wakeLock == null) {
+                PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                if (pm != null) {
+                    wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
+                            "TorrentPlayer:downloads");
+                    wakeLock.setReferenceCounted(false);
+                }
+            }
+            if (wifiLock == null) {
+                WifiManager wm = (WifiManager) getApplicationContext()
+                        .getSystemService(Context.WIFI_SERVICE);
+                if (wm != null) {
+                    int mode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB_MR1
+                            ? WifiManager.WIFI_MODE_FULL_HIGH_PERF
+                            : WifiManager.WIFI_MODE_FULL;
+                    wifiLock = wm.createWifiLock(mode, "TorrentPlayer:downloads-wifi");
+                    wifiLock.setReferenceCounted(false);
+                }
+            }
+            try {
+                if (wakeLock != null && !wakeLock.isHeld()) wakeLock.acquire();
+            } catch (Throwable t) {
+                Log.w(TAG, "wake lock acquire failed", t);
+            }
+            try {
+                if (wifiLock != null && !wifiLock.isHeld()) wifiLock.acquire();
+            } catch (Throwable t) {
+                Log.w(TAG, "wifi lock acquire failed", t);
+            }
+        } else {
+            try {
+                if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
+            } catch (Throwable t) {
+                Log.w(TAG, "wifi lock release failed", t);
+            }
+            try {
+                if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+            } catch (Throwable t) {
+                Log.w(TAG, "wake lock release failed", t);
+            }
+        }
     }
 
     private String idleText() {

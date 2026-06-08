@@ -13,6 +13,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.vikas.torrentplayer.R;
 import com.vikas.torrentplayer.databinding.FragmentDownloadsBinding;
+import com.vikas.torrentplayer.service.TorrentDownloadService;
 import com.vikas.torrentplayer.torrent.DownloadHandle;
 import com.vikas.torrentplayer.torrent.TorrentManager;
 import com.vikas.torrentplayer.ui.player.PlayerActivity;
@@ -55,6 +56,7 @@ public class DownloadsFragment extends Fragment {
             @Override
             public void onPauseToggle(DownloadHandle h) {
                 if (h.state.getValue() == DownloadHandle.State.PAUSED) {
+                    TorrentDownloadService.start(requireContext());
                     TorrentManager.get().resume(h.infoHash);
                 } else {
                     TorrentManager.get().pause(h.infoHash);

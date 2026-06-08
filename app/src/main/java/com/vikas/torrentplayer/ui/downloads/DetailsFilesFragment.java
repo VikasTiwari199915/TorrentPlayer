@@ -22,6 +22,7 @@ import com.vikas.torrentplayer.BuildConfig;
 import com.vikas.torrentplayer.R;
 import com.vikas.torrentplayer.databinding.FragmentDetailsListBinding;
 import com.vikas.torrentplayer.databinding.ItemFileTreeBinding;
+import com.vikas.torrentplayer.service.TorrentDownloadService;
 import com.vikas.torrentplayer.torrent.TorrentManager;
 import com.vikas.torrentplayer.tree.FileTreeNode;
 import com.vikas.torrentplayer.utils.FormatUtils;
@@ -80,7 +81,7 @@ public class DetailsFilesFragment extends Fragment {
         TorrentHandle handle = TorrentManager.get().handleFor(hash);
 
         b.recycler.setLayoutManager(new LinearLayoutManager(requireContext()));
-        b.recycler.setAdapter(new TreeAdapter(root.flatten(), baseDir, handle, requireContext()));
+        b.recycler.setAdapter(new TreeAdapter(root.flatten(), baseDir, handle, hash, requireContext()));
     }
 
     @Override
@@ -139,13 +140,15 @@ public class DetailsFilesFragment extends Fragment {
         private final List<FileTreeNode> rows;
         private final File baseDir;
         private final TorrentHandle handle;
+        private final String infoHash;
         private final Context ctx;
 
         TreeAdapter(List<FileTreeNode> rows, File baseDir,
-                    @Nullable TorrentHandle handle, Context ctx) {
+                    @Nullable TorrentHandle handle, String infoHash, Context ctx) {
             this.rows = rows;
             this.baseDir = baseDir;
             this.handle = handle;
+            this.infoHash = infoHash;
             this.ctx = ctx;
         }
 
@@ -220,14 +223,11 @@ public class DetailsFilesFragment extends Fragment {
         }
 
         private void applyPriority(FileTreeNode node, boolean enable) {
-            if (handle == null || !handle.isValid()) return;
             List<Integer> indices = new ArrayList<>();
             node.collectFileIndices(indices);
-            Priority target = enable ? Priority.DEFAULT : Priority.IGNORE;
-            for (int idx : indices) {
-                try { handle.filePriority(idx, target); }
-                catch (Throwable t) { /* best effort */ }
-            }
+            if (indices.isEmpty()) return;
+            if (enable) TorrentDownloadService.start(ctx);
+            TorrentManager.get().setFilePriority(infoHash, indices, enable);
         }
 
         static class VH extends RecyclerView.ViewHolder {

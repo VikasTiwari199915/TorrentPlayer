@@ -26,6 +26,7 @@ import com.vikas.torrentplayer.api.models.tmdb.TMDBEpisode;
 import com.vikas.torrentplayer.api.models.tmdb.TMDBSeasonSummary;
 import com.vikas.torrentplayer.api.models.tmdb.TMDBSeriesDetails;
 import com.vikas.torrentplayer.databinding.ActivityDetailBinding;
+import com.vikas.torrentplayer.service.TorrentDownloadService;
 import com.vikas.torrentplayer.torbox.TorBoxClient;
 import com.vikas.torrentplayer.torbox.TorBoxManager;
 import com.vikas.torrentplayer.torrent.DownloadHandle;
@@ -226,6 +227,7 @@ public class DetailActivity extends AppCompatActivity {
     private DownloadHandle safeStartStream(TorrentItem item) {
         try {
             TorrentManager.get().init(getApplicationContext());
+            TorrentDownloadService.start(this);
             return TorrentManager.get().startStream(vm.result(), item);
         } catch (Throwable ex) {
             android.util.Log.e("DetailActivity", "startStream failed", ex);

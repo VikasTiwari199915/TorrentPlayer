@@ -17,6 +17,7 @@ import com.vikas.torrentplayer.torrent.TorrentManager;
 import com.vikas.torrentplayer.utils.FormatUtils;
 
 import org.libtorrent4j.PartialPieceInfo;
+import org.libtorrent4j.Priority;
 import org.libtorrent4j.TorrentHandle;
 import org.libtorrent4j.TorrentInfo;
 
@@ -80,15 +81,23 @@ public class DetailsPiecesFragment extends Fragment {
         int total = ti.numPieces();
         int[] states = new int[total];
         int have = 0;
+        int skipped = 0;
+        int missingCount = 0;
         StringBuilder missing = new StringBuilder();
         for (int i = 0; i < total; i++) {
             boolean h = th.havePiece(i);
             if (h) {
                 states[i] = 1;
                 have++;
-            } else if (missing.length() < 180) {
-                if (missing.length() > 0) missing.append(", ");
-                missing.append(i);
+            } else if (isIgnored(th, i)) {
+                states[i] = 3;
+                skipped++;
+            } else {
+                missingCount++;
+                if (missing.length() < 180) {
+                    if (missing.length() > 0) missing.append(", ");
+                    missing.append(i);
+                }
             }
         }
 
@@ -121,18 +130,22 @@ public class DetailsPiecesFragment extends Fragment {
             }
         } catch (Throwable ignored) {}
 
-        int missingCount = Math.max(0, total - have);
         b.pieceMap.setPieceStates(states);
         b.piecesSummary.setText(have + " / " + total + " pieces  ·  "
                 + FormatUtils.humanBytes(ti.pieceLength()) + " each");
         String availabilityText = available >= 0 ? String.valueOf(available) : "—";
         b.piecesDetail.setText(String.format(Locale.US,
-                "Missing: %d  ·  Active: %d  ·  Available from peers: %s  ·  Unavailable missing: %d",
-                missingCount, active, availabilityText, rareMissing));
+                "Missing: %d  ·  Active: %d  ·  Skipped: %d  ·  Available from peers: %s  ·  Unavailable missing: %d",
+                missingCount, active, skipped, availabilityText, rareMissing));
         b.missingPieces.setText(missingCount == 0
-                ? "All pieces are complete."
+                ? "All wanted pieces are complete."
                 : "Missing indexes: " + missing
                         + (missing.length() >= 180 ? "…" : ""));
+    }
+
+    private boolean isIgnored(TorrentHandle th, int piece) {
+        try { return th.piecePriority(piece) == Priority.IGNORE; }
+        catch (Throwable ignored) { return false; }
     }
 
     @Override

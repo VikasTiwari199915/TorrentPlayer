@@ -22,6 +22,7 @@ import android.widget.Toast;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.progressindicator.LinearProgressIndicator;
 import com.vikas.torrentplayer.databinding.ActivityMainBinding;
+import com.vikas.torrentplayer.service.TorrentDownloadService;
 import com.vikas.torrentplayer.utils.AppAutoUpdater;
 import com.vikas.torrentplayer.utils.AppUpdateListener;
 
@@ -33,8 +34,9 @@ public class MainActivity extends AppCompatActivity {
 
     private final ActivityResultLauncher<String> notifPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
-                // No-op — service has already started; the notification just
-                // won't show without permission, which is fine.
+                if (granted) {
+                    TorrentDownloadService.start(this);
+                }
             });
 
     @Override
@@ -51,6 +53,8 @@ public class MainActivity extends AppCompatActivity {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
                     != PackageManager.PERMISSION_GRANTED) {
                 notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
+            } else {
+                TorrentDownloadService.start(this);
             }
         }
 

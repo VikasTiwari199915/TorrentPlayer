@@ -834,6 +834,7 @@ public class TorrentManager {
             try {
                 th.forceRecheck();
                 th.resume();
+                requestMissingVideoPieces(th, records.get(infoHash));
                 if (h != null) persistAsync(h);
             } catch (Throwable t) {
                 Log.e(TAG, "force recheck failed for " + infoHash, t);
@@ -842,6 +843,50 @@ public class TorrentManager {
                             ? t.getMessage() : t.getClass().getSimpleName());
                     h.state.postValue(DownloadHandle.State.ERROR);
                 }
+            }
+        });
+    }
+
+    @MainThread
+    public void setFilePriority(@Nullable String infoHash, @NonNull List<Integer> fileIndices,
+                                boolean enable) {
+        if (infoHash == null || infoHash.isEmpty() || fileIndices.isEmpty()) return;
+        DownloadHandle h = handles.get(infoHash);
+        TorrentRecord rec = records.get(infoHash);
+        if (h == null || rec == null || rec.hash == null || rec.info == null || session == null) return;
+
+        if (enable) {
+            h.errorMessage.setValue(null);
+            DownloadHandle.State state = h.state.getValue();
+            if (state == DownloadHandle.State.FINISHED
+                    || state == DownloadHandle.State.PAUSED
+                    || state == DownloadHandle.State.ERROR) {
+                h.state.setValue(DownloadHandle.State.BUFFERING);
+                DownloadHandle.Progress p = h.progress.getValue();
+                if (p != null) {
+                    h.progress.setValue(new DownloadHandle.Progress(
+                            Math.min(99, p.percent), 0, p.seeders, p.bufferProgress));
+                }
+                persistAsync(h);
+            }
+        }
+
+        final Sha1Hash hash = rec.hash;
+        final TorrentInfo ti = rec.info;
+        final List<Integer> indices = new ArrayList<>(fileIndices);
+        io.execute(() -> {
+            TorrentHandle th = session.find(hash);
+            if (th == null || !th.isValid()) return;
+            Priority target = enable ? Priority.DEFAULT : Priority.IGNORE;
+            for (int idx : indices) {
+                try { th.filePriority(idx, target); }
+                catch (Throwable t) { Log.w(TAG, "filePriority(" + idx + ") failed", t); }
+            }
+            if (enable) {
+                requestFilePieces(th, ti, indices);
+                try { th.setFlags(TorrentFlags.AUTO_MANAGED); }
+                catch (Throwable t) { Log.w(TAG, "setFlags failed", t); }
+                th.resume();
             }
         });
     }
@@ -1074,19 +1119,20 @@ public class TorrentManager {
                         : largestOf(files, videoIndices);
                 final List<Integer> subtitleIndices = findSubtitleFiles(files);
 
+                Set<Integer> wantedFiles = new LinkedHashSet<>();
+                for (int i : videoIndices) wantedFiles.add(i);
+                for (int i : subtitleIndices) wantedFiles.add(i);
+                if (videoIndices.isEmpty() && videoIdx >= 0) wantedFiles.add(videoIdx);
+                int boundaryFiles = includePieceBoundaryFiles(files, ti.pieceLength(), wantedFiles);
+
                 Priority[] priorities = new Priority[files.numFiles()];
                 for (int i = 0; i < priorities.length; i++) {
-                    boolean isVideo = videoIndices.contains(i);
-                    boolean isSub = subtitleIndices.contains(i);
                     // Multi-file torrents (e.g. full season packs): include every
                     // recognised video and subtitle; skip .nfo, .txt, .exe, .zip,
-                    // sample dirs, .url shortcuts, etc.
-                    boolean wanted = isVideo || isSub
-                            // Single-file torrents whose only file didn't match a
-                            // video extension — still download it (could be a
-                            // weird container like .ogm).
-                            || (videoIndices.isEmpty() && i == videoIdx);
-                    priorities[i] = wanted ? Priority.DEFAULT : Priority.IGNORE;
+                    // sample dirs, .url shortcuts, etc. Files sharing an edge
+                    // piece with a wanted file are also included, otherwise the
+                    // first/last video pieces can never hash as complete.
+                    priorities[i] = wantedFiles.contains(i) ? Priority.DEFAULT : Priority.IGNORE;
                 }
 
                 final DownloadHandle.State finalState = targetState != null
@@ -1104,6 +1150,7 @@ public class TorrentManager {
                     final TorrentHandle fe = existing;
                     main.post(() -> {
                         bindRecord(handle, ti, files, videoIdx, subtitleIndices);
+                        io.execute(() -> ensureWantedBoundaryPiecePriority(fe, ti, files, wantedFiles));
                         if (!addPaused) {
                             TorrentRecord r = records.get(handle.infoHash);
                             io.execute(() -> prioritiseTailPieces(fe, r));
@@ -1145,6 +1192,7 @@ public class TorrentManager {
                 final boolean hadResume = resumeArg != null;
                 main.post(() -> {
                     bindRecord(handle, ti, files, videoIdx, subtitleIndices);
+                    io.execute(() -> ensureWantedBoundaryPiecePriority(fth, ti, files, wantedFiles));
                     if (!addPaused) {
                         TorrentRecord r = records.get(handle.infoHash);
                         io.execute(() -> prioritiseTailPieces(fth, r));
@@ -1154,6 +1202,7 @@ public class TorrentManager {
                     Log.i(TAG, "added torrent \"" + ti.name() + "\" videoFile="
                             + (videoIdx >= 0 ? files.filePath(videoIdx) : "<none>")
                             + " subs=" + subtitleIndices.size()
+                            + " boundaryFiles=" + boundaryFiles
                             + " paused=" + addPaused
                             + " resume=" + hadResume);
                 });
@@ -1219,10 +1268,54 @@ public class TorrentManager {
         int deadlineMs = 1000;
         for (int i = rec.tailBufferFirstPiece; i <= rec.videoLastPiece; i++) {
             try {
+                th.piecePriority(i, Priority.DEFAULT);
                 th.setPieceDeadline(i, deadlineMs);
                 deadlineMs += 100;
             } catch (Throwable t) {
                 Log.w(TAG, "setPieceDeadline(" + i + ") failed", t);
+            }
+        }
+    }
+
+    private void requestMissingVideoPieces(TorrentHandle th, @Nullable TorrentRecord rec) {
+        if (th == null || !th.isValid() || rec == null
+                || rec.videoFirstPiece < 0 || rec.videoLastPiece < rec.videoFirstPiece) return;
+        int deadlineMs = 0;
+        for (int i = rec.videoFirstPiece; i <= rec.videoLastPiece; i++) {
+            try {
+                if (!th.havePiece(i)) {
+                    th.piecePriority(i, Priority.DEFAULT);
+                    if (deadlineMs < 20_000) {
+                        th.setPieceDeadline(i, deadlineMs);
+                        deadlineMs += 200;
+                    }
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "request missing piece " + i + " failed", t);
+            }
+        }
+    }
+
+    private void requestFilePieces(TorrentHandle th, TorrentInfo ti, List<Integer> fileIndices) {
+        if (th == null || !th.isValid() || ti == null || fileIndices == null) return;
+        FileStorage files = ti.files();
+        int pieceSize = Math.max(1, ti.pieceLength());
+        int deadlineMs = 0;
+        Set<Integer> touched = new LinkedHashSet<>();
+        for (int idx : fileIndices) {
+            int[] range = pieceRange(files, idx, pieceSize);
+            if (range[0] < 0) continue;
+            for (int piece = range[0]; piece <= range[1]; piece++) {
+                if (!touched.add(piece)) continue;
+                try {
+                    th.piecePriority(piece, Priority.DEFAULT);
+                    if (!th.havePiece(piece) && deadlineMs < 20_000) {
+                        th.setPieceDeadline(piece, deadlineMs);
+                        deadlineMs += 200;
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "request file piece " + piece + " failed", t);
+                }
             }
         }
     }
@@ -1557,6 +1650,63 @@ public class TorrentManager {
             if (isExt(path, SUBTITLE_EXTS)) out.add(i);
         }
         return out;
+    }
+
+    /**
+     * libtorrent pieces can span file boundaries. If the video's final piece
+     * also contains bytes from a skipped .nfo/.txt/etc. file, that piece cannot
+     * be written and verified unless the neighbour file is wanted too.
+     */
+    private static int includePieceBoundaryFiles(FileStorage files, int pieceSize,
+                                                 Set<Integer> wantedFiles) {
+        if (files == null || pieceSize <= 0 || wantedFiles.isEmpty()) return 0;
+        List<int[]> wantedRanges = new ArrayList<>();
+        for (int idx : wantedFiles) {
+            int[] range = pieceRange(files, idx, pieceSize);
+            if (range[0] >= 0) wantedRanges.add(range);
+        }
+
+        int added = 0;
+        int n = files.numFiles();
+        for (int i = 0; i < n; i++) {
+            if (wantedFiles.contains(i)) continue;
+            int[] candidate = pieceRange(files, i, pieceSize);
+            if (candidate[0] < 0) continue;
+            for (int[] wanted : wantedRanges) {
+                if (candidate[0] <= wanted[1] && wanted[0] <= candidate[1]) {
+                    wantedFiles.add(i);
+                    added++;
+                    break;
+                }
+            }
+        }
+        return added;
+    }
+
+    private static int[] pieceRange(FileStorage files, int fileIndex, int pieceSize) {
+        if (fileIndex < 0 || fileIndex >= files.numFiles()) return new int[] {-1, -1};
+        long size = files.fileSize(fileIndex);
+        if (size <= 0 || pieceSize <= 0) return new int[] {-1, -1};
+        long offset = files.fileOffset(fileIndex);
+        int first = (int) (offset / pieceSize);
+        int last = (int) ((offset + size - 1) / pieceSize);
+        return new int[] { first, last };
+    }
+
+    private void ensureWantedBoundaryPiecePriority(TorrentHandle th, TorrentInfo ti, FileStorage files,
+                                                   Set<Integer> wantedFiles) {
+        if (th == null || !th.isValid() || ti == null || files == null || wantedFiles == null) return;
+        int pieceSize = Math.max(1, ti.pieceLength());
+        for (int idx : wantedFiles) {
+            int[] range = pieceRange(files, idx, pieceSize);
+            if (range[0] < 0) continue;
+            try { th.piecePriority(range[0], Priority.DEFAULT); }
+            catch (Throwable ignored) {}
+            if (range[1] != range[0]) {
+                try { th.piecePriority(range[1], Priority.DEFAULT); }
+                catch (Throwable ignored) {}
+            }
+        }
     }
 
     private static boolean isExt(String path, String[] exts) {

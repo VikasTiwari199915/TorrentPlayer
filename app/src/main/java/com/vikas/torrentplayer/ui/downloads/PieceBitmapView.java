@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.util.AttributeSet;
+import android.util.TypedValue;
 import android.view.View;
 
 import androidx.annotation.Nullable;
@@ -18,6 +19,7 @@ public class PieceBitmapView extends View {
     private final Paint donePaint = new Paint();
     private final Paint activePaint = new Paint();
     private final Paint todoPaint = new Paint();
+    private final Paint skippedPaint = new Paint();
     private final Paint gapPaint = new Paint();
 
     public PieceBitmapView(Context context) { this(context, null); }
@@ -28,8 +30,12 @@ public class PieceBitmapView extends View {
         donePaint.setStyle(Paint.Style.FILL);
         activePaint.setColor(0xFFFFC857);
         activePaint.setStyle(Paint.Style.FILL);
-        todoPaint.setColor(0x33000000);
+        todoPaint.setColor(withAlpha(resolveColor(
+                com.google.android.material.R.attr.colorOutlineVariant, 0xFF6F7978), 0.65f));
         todoPaint.setStyle(Paint.Style.FILL);
+        skippedPaint.setColor(withAlpha(resolveColor(
+                com.google.android.material.R.attr.colorOutlineVariant, 0xFF6F7978), 0.25f));
+        skippedPaint.setStyle(Paint.Style.FILL);
         gapPaint.setColor(0x00000000);
         gapPaint.setStyle(Paint.Style.FILL);
     }
@@ -44,7 +50,7 @@ public class PieceBitmapView extends View {
         invalidate();
     }
 
-    /** 0 = missing, 1 = complete, 2 = active/requested/downloading. */
+    /** 0 = missing, 1 = complete, 2 = active/requested/downloading, 3 = skipped. */
     public void setPieceStates(int[] states) {
         this.states = states == null ? new int[0] : states;
         invalidate();
@@ -77,6 +83,7 @@ public class PieceBitmapView extends View {
             switch (states[i]) {
                 case 2: p = activePaint; break;
                 case 1: p = donePaint; break;
+                case 3: p = skippedPaint; break;
                 case 0:
                 default: p = todoPaint; break;
             }
@@ -86,5 +93,20 @@ public class PieceBitmapView extends View {
 
     private int dp(int value) {
         return (int) (value * getResources().getDisplayMetrics().density);
+    }
+
+    private int resolveColor(int attr, int fallback) {
+        TypedValue value = new TypedValue();
+        if (getContext().getTheme().resolveAttribute(attr, value, true)
+                && value.type >= TypedValue.TYPE_FIRST_COLOR_INT
+                && value.type <= TypedValue.TYPE_LAST_COLOR_INT) {
+            return value.data;
+        }
+        return fallback;
+    }
+
+    private static int withAlpha(int color, float alpha) {
+        int a = Math.max(0, Math.min(255, Math.round(alpha * 255)));
+        return (color & 0x00FFFFFF) | (a << 24);
     }
 }
