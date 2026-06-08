@@ -6,6 +6,7 @@ import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -15,8 +16,14 @@ import com.vikas.torrentplayer.databinding.FragmentDetailsPiecesBinding;
 import com.vikas.torrentplayer.torrent.TorrentManager;
 import com.vikas.torrentplayer.utils.FormatUtils;
 
+import org.libtorrent4j.PartialPieceInfo;
 import org.libtorrent4j.TorrentHandle;
 import org.libtorrent4j.TorrentInfo;
+
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 public class DetailsPiecesFragment extends Fragment {
 
@@ -53,6 +60,10 @@ public class DetailsPiecesFragment extends Fragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
         hash = requireArguments().getString(ARG_HASH);
+        b.verifyPieces.setOnClickListener(v -> {
+            TorrentManager.get().forceRecheck(hash);
+            Toast.makeText(requireContext(), "Verifying torrent pieces…", Toast.LENGTH_SHORT).show();
+        });
         refresh();
     }
 
@@ -67,16 +78,61 @@ public class DetailsPiecesFragment extends Fragment {
             return;
         }
         int total = ti.numPieces();
-        boolean[] map = new boolean[total];
+        int[] states = new int[total];
         int have = 0;
+        StringBuilder missing = new StringBuilder();
         for (int i = 0; i < total; i++) {
             boolean h = th.havePiece(i);
-            map[i] = h;
-            if (h) have++;
+            if (h) {
+                states[i] = 1;
+                have++;
+            } else if (missing.length() < 180) {
+                if (missing.length() > 0) missing.append(", ");
+                missing.append(i);
+            }
         }
-        b.pieceMap.setPieces(map);
+
+        int active = 0;
+        try {
+            List<PartialPieceInfo> queue = th.getDownloadQueue();
+            Set<Integer> activePieces = new HashSet<>();
+            if (queue != null) {
+                for (PartialPieceInfo p : queue) {
+                    int idx = p.pieceIndex();
+                    if (idx >= 0 && idx < total && states[idx] == 0) {
+                        states[idx] = 2;
+                        activePieces.add(idx);
+                    }
+                }
+            }
+            active = activePieces.size();
+        } catch (Throwable ignored) {}
+
+        int available = -1;
+        int rareMissing = 0;
+        try {
+            int[] availability = th.pieceAvailability();
+            if (availability != null) {
+                available = 0;
+                for (int i = 0; i < Math.min(total, availability.length); i++) {
+                    if (availability[i] > 0) available++;
+                    else if (states[i] == 0) rareMissing++;
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        int missingCount = Math.max(0, total - have);
+        b.pieceMap.setPieceStates(states);
         b.piecesSummary.setText(have + " / " + total + " pieces  ·  "
                 + FormatUtils.humanBytes(ti.pieceLength()) + " each");
+        String availabilityText = available >= 0 ? String.valueOf(available) : "—";
+        b.piecesDetail.setText(String.format(Locale.US,
+                "Missing: %d  ·  Active: %d  ·  Available from peers: %s  ·  Unavailable missing: %d",
+                missingCount, active, availabilityText, rareMissing));
+        b.missingPieces.setText(missingCount == 0
+                ? "All pieces are complete."
+                : "Missing indexes: " + missing
+                        + (missing.length() >= 180 ? "…" : ""));
     }
 
     @Override

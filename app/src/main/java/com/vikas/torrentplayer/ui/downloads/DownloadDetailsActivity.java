@@ -3,6 +3,9 @@ package com.vikas.torrentplayer.ui.downloads;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
+import android.view.Menu;
+import android.view.MenuItem;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -55,8 +58,25 @@ public class DownloadDetailsActivity extends AppCompatActivity {
                 case 1: tab.setText(R.string.tab_files); break;
                 case 2: tab.setText(R.string.tab_pieces); break;
                 case 3: tab.setText(R.string.tab_trackers); break;
+                case 4: tab.setText(R.string.tab_peers); break;
             }
         }).attach();
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        getMenuInflater().inflate(R.menu.download_details_menu, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
+        if (item.getItemId() == R.id.action_verify_pieces) {
+            TorrentManager.get().forceRecheck(infoHash);
+            Toast.makeText(this, R.string.action_verify_pieces, Toast.LENGTH_SHORT).show();
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
     }
 
     /** Holds the four tabs. Each fragment reads its data lazily from
@@ -75,11 +95,12 @@ public class DownloadDetailsActivity extends AppCompatActivity {
                 case 1: return DetailsFilesFragment.newInstance(infoHash);
                 case 2: return DetailsPiecesFragment.newInstance(infoHash);
                 case 3: return DetailsTrackersFragment.newInstance(infoHash);
+                case 4: return DetailsPeersFragment.newInstance(infoHash);
                 case 0:
                 default: return DetailsInfoFragment.newInstance(infoHash);
             }
         }
 
-        @Override public int getItemCount() { return 4; }
+        @Override public int getItemCount() { return 5; }
     }
 }

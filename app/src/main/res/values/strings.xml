@@ -72,6 +72,7 @@
     <string name="action_resume">Resume</string>
     <string name="action_remove">Remove</string>
     <string name="action_play_now">Play Now</string>
+    <string name="action_verify_pieces">Verify pieces</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
@@ -127,6 +128,7 @@
     <string name="tab_files">Files</string>
     <string name="tab_pieces">Pieces</string>
     <string name="tab_trackers">Trackers</string>
+    <string name="tab_peers">Peers</string>
 
     <!-- Storage settings -->
     <string name="pref_cat_storage">Storage</string>

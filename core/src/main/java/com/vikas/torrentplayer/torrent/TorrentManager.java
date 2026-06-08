@@ -813,6 +813,39 @@ public class TorrentManager {
         return th != null && th.isValid() ? th : null;
     }
 
+    /** Force libtorrent to hash-check all pieces again. Missing/corrupt pieces
+     *  are marked incomplete and downloaded again when the torrent resumes. */
+    public void forceRecheck(@Nullable String infoHash) {
+        if (infoHash == null || infoHash.isEmpty()) return;
+        DownloadHandle h = handles.get(infoHash);
+        if (h != null) {
+            h.errorMessage.postValue(null);
+            h.state.postValue(DownloadHandle.State.STARTING);
+        }
+        io.execute(() -> {
+            TorrentHandle th = handleFor(infoHash);
+            if (th == null) {
+                if (h != null) {
+                    h.errorMessage.postValue("Torrent is not active yet");
+                    h.state.postValue(DownloadHandle.State.ERROR);
+                }
+                return;
+            }
+            try {
+                th.forceRecheck();
+                th.resume();
+                if (h != null) persistAsync(h);
+            } catch (Throwable t) {
+                Log.e(TAG, "force recheck failed for " + infoHash, t);
+                if (h != null) {
+                    h.errorMessage.postValue(t.getMessage() != null
+                            ? t.getMessage() : t.getClass().getSimpleName());
+                    h.state.postValue(DownloadHandle.State.ERROR);
+                }
+            }
+        });
+    }
+
     /**
      * Everything an ExoPlayer DataSource needs to map a byte position inside
      * the video file to a libtorrent piece index.

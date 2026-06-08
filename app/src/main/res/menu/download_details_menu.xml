@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/action_verify_pieces"
+        android:icon="@drawable/rounded_verified_24"
+        android:title="@string/action_verify_pieces"
+        app:showAsAction="ifRoom" />
+</menu>
