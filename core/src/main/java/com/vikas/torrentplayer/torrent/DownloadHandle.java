@@ -31,7 +31,7 @@ public class DownloadHandle {
     public final String magnetUrl;
 
     public final MutableLiveData<State> state = new MutableLiveData<>(State.STARTING);
-    public final MutableLiveData<Progress> progress = new MutableLiveData<>(new Progress(0, 0, 0, 0));
+    public final MutableLiveData<Progress> progress;
     public final MutableLiveData<File> videoFile = new MutableLiveData<>(null);
     public final MutableLiveData<String> errorMessage = new MutableLiveData<>(null);
     /** External subtitle files discovered inside the torrent payload (.srt/.vtt/.ass…). */
@@ -49,6 +49,7 @@ public class DownloadHandle {
         this.quality = quality;
         this.sizeBytes = sizeBytes;
         this.magnetUrl = magnetUrl;
+        this.progress = new MutableLiveData<>(new Progress(0, 0, 0, 0, 0, sizeBytes));
     }
 
     /** Snapshot of streaming progress at a given moment. */
@@ -59,12 +60,19 @@ public class DownloadHandle {
         public final long downloadSpeed;
         public final int seeders;
         public final int bufferProgress; // 0..100, head-buffer for playback
+        /** Verified bytes downloaded for files whose priority is not ignored. */
+        public final long downloadedBytes;
+        /** Total bytes wanted after file priorities are applied. */
+        public final long totalBytes;
 
-        public Progress(int percent, long downloadSpeed, int seeders, int bufferProgress) {
+        public Progress(int percent, long downloadSpeed, int seeders, int bufferProgress,
+                        long downloadedBytes, long totalBytes) {
             this.percent = percent;
             this.downloadSpeed = downloadSpeed;
             this.seeders = seeders;
             this.bufferProgress = bufferProgress;
+            this.downloadedBytes = downloadedBytes;
+            this.totalBytes = totalBytes;
         }
     }
 }

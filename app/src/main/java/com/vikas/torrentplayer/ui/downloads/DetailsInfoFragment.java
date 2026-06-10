@@ -76,6 +76,11 @@ public class DetailsInfoFragment extends Fragment {
         addStat(container, ctx, "Size", FormatUtils.humanBytes(handle.sizeBytes));
         if (handle.quality != null) addStat(container, ctx, "Quality", handle.quality);
         addStat(container, ctx, "Progress", (p == null ? 0 : p.percent) + "%");
+        long downloadedBytes = p == null ? 0 : p.downloadedBytes;
+        long totalBytes = p == null || p.totalBytes <= 0 ? handle.sizeBytes : p.totalBytes;
+        addStat(container, ctx, "Downloaded",
+                FormatUtils.humanBytes(downloadedBytes) + " of "
+                        + FormatUtils.humanBytes(totalBytes));
         addStat(container, ctx, "Head + tail buffer", (p == null ? 0 : p.bufferProgress) + "%");
         addStat(container, ctx, "Download speed",
                 p == null ? "—" : FormatUtils.humanSpeed(p.downloadSpeed));

@@ -23,13 +23,13 @@ import com.vikas.torrentplayer.R;
 import com.vikas.torrentplayer.databinding.FragmentDetailsListBinding;
 import com.vikas.torrentplayer.databinding.ItemFileTreeBinding;
 import com.vikas.torrentplayer.service.TorrentDownloadService;
+import com.vikas.torrentplayer.torrent.DownloadHandle;
 import com.vikas.torrentplayer.torrent.TorrentManager;
 import com.vikas.torrentplayer.tree.FileTreeNode;
 import com.vikas.torrentplayer.utils.FormatUtils;
+import com.google.android.material.checkbox.MaterialCheckBox;
 
 import org.libtorrent4j.FileStorage;
-import org.libtorrent4j.Priority;
-import org.libtorrent4j.TorrentHandle;
 import org.libtorrent4j.TorrentInfo;
 
 import java.io.File;
@@ -50,6 +50,9 @@ public class DetailsFilesFragment extends Fragment {
     }
 
     private FragmentDetailsListBinding b;
+    private TreeAdapter adapter;
+    private boolean statsRequestPending;
+    private String infoHash;
 
     @Nullable
     @Override
@@ -61,8 +64,8 @@ public class DetailsFilesFragment extends Fragment {
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
-        String hash = requireArguments().getString(ARG_HASH);
-        TorrentInfo ti = TorrentManager.get().torrentInfoFor(hash);
+        infoHash = requireArguments().getString(ARG_HASH);
+        TorrentInfo ti = TorrentManager.get().torrentInfoFor(infoHash);
 
         if (ti == null || !ti.isValid()) {
             b.empty.setText("Torrent metadata not yet available");
@@ -78,15 +81,32 @@ public class DetailsFilesFragment extends Fragment {
 
         FileTreeNode root = FileTreeNode.build(fs);
         File baseDir = TorrentManager.get().getSaveDir();
-        TorrentHandle handle = TorrentManager.get().handleFor(hash);
 
         b.recycler.setLayoutManager(new LinearLayoutManager(requireContext()));
-        b.recycler.setAdapter(new TreeAdapter(root.flatten(), baseDir, handle, hash, requireContext()));
+        adapter = new TreeAdapter(root.flatten(), baseDir, infoHash, requireContext(),
+                this::refreshFileStats);
+        b.recycler.setAdapter(adapter);
+
+        DownloadHandle download = TorrentManager.get().findByHash(infoHash);
+        if (download != null) {
+            download.progress.observe(getViewLifecycleOwner(), ignored -> refreshFileStats());
+        }
+        refreshFileStats();
+    }
+
+    private void refreshFileStats() {
+        if (statsRequestPending || adapter == null || infoHash == null) return;
+        statsRequestPending = true;
+        TorrentManager.get().loadFileStats(infoHash, stats -> {
+            statsRequestPending = false;
+            if (adapter != null && stats != null) adapter.updateStats(stats);
+        });
     }
 
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+        adapter = null;
         b = null;
     }
 
@@ -139,17 +159,25 @@ public class DetailsFilesFragment extends Fragment {
     private static class TreeAdapter extends RecyclerView.Adapter<TreeAdapter.VH> {
         private final List<FileTreeNode> rows;
         private final File baseDir;
-        private final TorrentHandle handle;
         private final String infoHash;
         private final Context ctx;
+        private final Runnable refreshStats;
+        private long[] downloadedBytes = new long[0];
+        private boolean[] wanted = new boolean[0];
 
-        TreeAdapter(List<FileTreeNode> rows, File baseDir,
-                    @Nullable TorrentHandle handle, String infoHash, Context ctx) {
+        TreeAdapter(List<FileTreeNode> rows, File baseDir, String infoHash,
+                    Context ctx, Runnable refreshStats) {
             this.rows = rows;
             this.baseDir = baseDir;
-            this.handle = handle;
             this.infoHash = infoHash;
             this.ctx = ctx;
+            this.refreshStats = refreshStats;
+        }
+
+        void updateStats(TorrentManager.FileStats stats) {
+            downloadedBytes = stats.downloadedBytes;
+            wanted = stats.wanted;
+            notifyDataSetChanged();
         }
 
         @NonNull
@@ -172,22 +200,22 @@ public class DetailsFilesFragment extends Fragment {
 
             b.icon.setImageResource(node.isFolder ? R.drawable.rounded_folder_24 : R.drawable.rounded_docs_24);
             b.name.setText(node.name);
-            String meta = FormatUtils.humanBytes(node.size);
-            if (node.isFolder) meta = node.fileCount + " files · " + meta;
-            b.meta.setText(meta);
+            NodeStats stats = statsFor(node);
+            b.meta.setText(formatMeta(node, stats));
+            b.progress.setProgressCompat(progressPercent(node, stats), false);
 
-            // Initial switch state
-            boolean wanted = isWanted(node);
-            // Set without firing the listener
-            b.toggle.setOnCheckedChangeListener(null);
-            b.toggle.setChecked(wanted);
-            b.toggle.setOnCheckedChangeListener((btn, isChecked) -> applyPriority(node, isChecked));
+            b.toggle.clearOnCheckedStateChangedListeners();
+            b.toggle.setCheckedState(stats.checkedState);
+            b.toggle.addOnCheckedStateChangedListener((button, state) -> {
+                if (state == MaterialCheckBox.STATE_INDETERMINATE) return;
+                applyPriority(node, state == MaterialCheckBox.STATE_CHECKED);
+            });
 
             // Tap on the row body to open the file (folders just toggle).
             b.getRoot().setOnClickListener(v -> {
                 if (node.isFolder) {
-                    boolean newState = !b.toggle.isChecked();
-                    b.toggle.setChecked(newState);
+                    boolean enable = b.toggle.getCheckedState() != MaterialCheckBox.STATE_CHECKED;
+                    applyPriority(node, enable);
                 } else {
                     File f = new File(baseDir, fullPath(node));
                     openFile(ctx, f);
@@ -206,28 +234,80 @@ public class DetailsFilesFragment extends Fragment {
             return sb.toString();
         }
 
-        private boolean isWanted(FileTreeNode node) {
-            if (handle == null || !handle.isValid()) return true;
+        private NodeStats statsFor(FileTreeNode node) {
             List<Integer> indices = new ArrayList<>();
             node.collectFileIndices(indices);
-            if (indices.isEmpty()) return true;
-            int wanted = 0;
+            int wantedCount = 0;
+            long downloaded = 0;
             for (int idx : indices) {
-                try {
-                    Priority p = handle.filePriority(idx);
-                    if (p != Priority.IGNORE) wanted++;
-                } catch (Throwable ignored) {}
+                if (idx >= 0 && idx < wanted.length && wanted[idx]) wantedCount++;
+                if (idx >= 0 && idx < downloadedBytes.length) {
+                    long fileSize = fileSizeForIndex(idx);
+                    downloaded += Math.min(fileSize, Math.max(0, downloadedBytes[idx]));
+                }
             }
-            // For folders, "wanted" = any descendant included
-            return wanted > 0;
+            int state;
+            if (wantedCount == 0) state = MaterialCheckBox.STATE_UNCHECKED;
+            else if (wantedCount == indices.size()) state = MaterialCheckBox.STATE_CHECKED;
+            else state = MaterialCheckBox.STATE_INDETERMINATE;
+            return new NodeStats(state, downloaded);
+        }
+
+        private long fileSizeForIndex(int fileIndex) {
+            for (FileTreeNode row : rows) {
+                if (!row.isFolder && row.fileIndex == fileIndex) return row.size;
+            }
+            return 0;
+        }
+
+        private String formatMeta(FileTreeNode node, NodeStats stats) {
+            int pct = progressPercent(node, stats);
+            String selection;
+            if (stats.checkedState == MaterialCheckBox.STATE_UNCHECKED) selection = "Skipped";
+            else if (pct >= 100) selection = "Complete";
+            else if (stats.downloadedBytes > 0) selection = "Downloading";
+            else selection = "Queued";
+            String prefix = node.isFolder ? node.fileCount + " files · " : "";
+            return prefix + FormatUtils.humanBytes(stats.downloadedBytes)
+                    + " of " + FormatUtils.humanBytes(node.size)
+                    + " · " + pct + "% · " + selection;
+        }
+
+        private static int progressPercent(FileTreeNode node, NodeStats stats) {
+            return node.size <= 0 ? 0
+                    : (int) Math.min(100, (stats.downloadedBytes * 100) / node.size);
         }
 
         private void applyPriority(FileTreeNode node, boolean enable) {
             List<Integer> indices = new ArrayList<>();
             node.collectFileIndices(indices);
             if (indices.isEmpty()) return;
+            ensureStatsCapacity(indices);
+            for (int idx : indices) wanted[idx] = enable;
+            notifyDataSetChanged();
             if (enable) TorrentDownloadService.start(ctx);
             TorrentManager.get().setFilePriority(infoHash, indices, enable);
+            refreshStats.run();
+        }
+
+        private void ensureStatsCapacity(List<Integer> indices) {
+            int required = wanted.length;
+            for (int idx : indices) required = Math.max(required, idx + 1);
+            if (required > wanted.length) {
+                boolean[] expanded = new boolean[required];
+                System.arraycopy(wanted, 0, expanded, 0, wanted.length);
+                wanted = expanded;
+            }
+        }
+
+        private static class NodeStats {
+            final int checkedState;
+            final long downloadedBytes;
+
+            NodeStats(int checkedState, long downloadedBytes) {
+                this.checkedState = checkedState;
+                this.downloadedBytes = downloadedBytes;
+            }
         }
 
         static class VH extends RecyclerView.ViewHolder {

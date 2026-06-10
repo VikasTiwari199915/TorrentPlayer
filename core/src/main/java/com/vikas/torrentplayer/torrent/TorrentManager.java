@@ -661,7 +661,11 @@ public class TorrentManager {
             // Force-zero the progress so the UI doesn't show stale speed
             DownloadHandle.Progress p = h.progress.getValue();
             int pct = p == null ? 0 : p.percent;
-            h.progress.setValue(new DownloadHandle.Progress(pct, 0, 0, p == null ? 0 : p.bufferProgress));
+            h.progress.setValue(new DownloadHandle.Progress(
+                    pct, 0, 0,
+                    p == null ? 0 : p.bufferProgress,
+                    p == null ? 0 : p.downloadedBytes,
+                    p == null ? h.sizeBytes : p.totalBytes));
             persistAsync(h);
         }
         final Sha1Hash hash = rec.hash;
@@ -815,6 +819,58 @@ public class TorrentManager {
         return th != null && th.isValid() ? th : null;
     }
 
+    public interface FileStatsCallback {
+        void onFileStats(@Nullable FileStats stats);
+    }
+
+    /** Immutable per-file progress/priority snapshot for the download details UI. */
+    public static class FileStats {
+        public final long[] downloadedBytes;
+        public final boolean[] wanted;
+
+        FileStats(long[] downloadedBytes, boolean[] wanted) {
+            this.downloadedBytes = downloadedBytes;
+            this.wanted = wanted;
+        }
+    }
+
+    /**
+     * Reads progress for every file in one background JNI call. Piece granularity
+     * only counts verified data and is substantially cheaper than block-level progress.
+     */
+    public void loadFileStats(@Nullable String infoHash, @NonNull FileStatsCallback callback) {
+        if (infoHash == null || infoHash.isEmpty()) {
+            main.post(() -> callback.onFileStats(null));
+            return;
+        }
+        String key = infoHash.toLowerCase(Locale.US);
+        TorrentRecord rec = records.get(key);
+        if (rec == null || rec.hash == null || rec.info == null || session == null) {
+            main.post(() -> callback.onFileStats(null));
+            return;
+        }
+        final Sha1Hash hash = rec.hash;
+        final int fileCount = rec.info.files().numFiles();
+        io.execute(() -> {
+            TorrentHandle th = session.find(hash);
+            if (th == null || !th.isValid()) {
+                main.post(() -> callback.onFileStats(null));
+                return;
+            }
+            try {
+                long[] progress = th.fileProgress(TorrentHandle.PIECE_GRANULARITY);
+                boolean[] wanted = new boolean[fileCount];
+                for (int i = 0; i < fileCount; i++) {
+                    wanted[i] = th.filePriority(i) != Priority.IGNORE;
+                }
+                main.post(() -> callback.onFileStats(new FileStats(progress, wanted)));
+            } catch (Throwable t) {
+                Log.w(TAG, "loadFileStats failed for " + key, t);
+                main.post(() -> callback.onFileStats(null));
+            }
+        });
+    }
+
     /** Force libtorrent to hash-check all pieces again. Missing/corrupt pieces
      *  are marked incomplete and downloaded again when the torrent resumes. */
     public void forceRecheck(@Nullable String infoHash) {
@@ -867,7 +923,8 @@ public class TorrentManager {
         DownloadHandle.Progress p = h.progress.getValue();
         if (p != null) {
             h.progress.setValue(new DownloadHandle.Progress(
-                    Math.min(99, p.percent), 0, p.seeders, p.bufferProgress));
+                    Math.min(99, p.percent), 0, p.seeders, p.bufferProgress,
+                    p.downloadedBytes, p.totalBytes));
         }
         persistAsync(h);
 
@@ -901,7 +958,8 @@ public class TorrentManager {
                 DownloadHandle.Progress p = h.progress.getValue();
                 if (p != null) {
                     h.progress.setValue(new DownloadHandle.Progress(
-                            Math.min(99, p.percent), 0, p.seeders, p.bufferProgress));
+                            Math.min(99, p.percent), 0, p.seeders, p.bufferProgress,
+                            p.downloadedBytes, p.totalBytes));
                 }
                 persistAsync(h);
             }
@@ -1551,7 +1609,8 @@ public class TorrentManager {
                         DownloadHandle.Progress p = dh.progress.getValue();
                         if (p != null) {
                             dh.progress.setValue(new DownloadHandle.Progress(
-                                    Math.min(99, p.percent), 0, p.seeders, p.bufferProgress));
+                                    Math.min(99, p.percent), 0, p.seeders, p.bufferProgress,
+                                    p.downloadedBytes, p.totalBytes));
                         }
                         persistAsync(dh);
                     });
@@ -1618,6 +1677,8 @@ public class TorrentManager {
                 ? countMissingWantedPieces(th, rec.info)
                 : 0;
         final long rawSpeed = status.downloadRate();
+        final long downloadedBytes = Math.max(0, status.totalWantedDone());
+        final long totalBytes = Math.max(0, status.totalWanted());
         final int seeders = status.numSeeds();
         final int bufferPct = computeHeadBuffer(rec, th);
         // Playback can begin once the HEAD is on disk — the tail (MP4 moov / MKV
@@ -1630,13 +1691,14 @@ public class TorrentManager {
                 && rec.videoFilePath.exists() && rec.videoFilePath.length() > 0;
 
         main.post(() -> applyProgress(key, rec, pct, rawSpeed, seeders, bufferPct,
-                headReady, fileReady, missingWanted));
+                downloadedBytes, totalBytes, headReady, fileReady, missingWanted));
     }
 
     @MainThread
     private void applyProgress(String key, TorrentRecord rec, int pct, long rawSpeed,
-                               int seeders, int bufferPct, boolean headReady,
-                               boolean fileReady, int missingWanted) {
+                               int seeders, int bufferPct, long downloadedBytes,
+                               long totalBytes, boolean headReady, boolean fileReady,
+                               int missingWanted) {
         DownloadHandle h = handles.get(key);
         if (h == null) return;
 
@@ -1648,7 +1710,8 @@ public class TorrentManager {
                 || (pct >= 100 && missingWanted == 0 && !rechecking.contains(key));
         long speed = stoppedish ? 0 : rawSpeed;
 
-        h.progress.setValue(new DownloadHandle.Progress(pct, speed, seeders, bufferPct));
+        h.progress.setValue(new DownloadHandle.Progress(
+                pct, speed, seeders, bufferPct, downloadedBytes, totalBytes));
 
         if (!rec.readyEmitted && rec.videoFilePath != null && headReady && fileReady) {
             rec.readyEmitted = true;
