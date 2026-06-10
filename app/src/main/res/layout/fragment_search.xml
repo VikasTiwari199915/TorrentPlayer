@@ -19,6 +19,7 @@
             android:layout_height="wrap_content"
             android:hint="@string/search_hint"
             app:layout_scrollFlags="scroll|enterAlways"
+            app:navigationIconTint="?attr/colorOnSurfaceVariant"
             app:menu="@menu/search_bar_menu" />
 
     </com.google.android.material.appbar.AppBarLayout>

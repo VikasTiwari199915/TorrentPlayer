@@ -8,6 +8,7 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:enforceStatusBarContrast" tools:targetApi="29">false</item>
         <item name="android:enforceNavigationBarContrast" tools:targetApi="29">false</item>
+        <item name="preferenceTheme">@style/TorrentPlayer.PreferenceOverlay</item>
     </style>
 
     <style name="Theme.TorrentPlayer" parent="Base.Theme.TorrentPlayer" />
@@ -49,6 +50,17 @@
         <item name="android:textSize">11sp</item>
         <item name="chipStartPadding">8dp</item>
         <item name="chipEndPadding">8dp</item>
+    </style>
+
+    <style name="Preference.SwitchPreferenceCompat"
+        parent="@style/Preference.SwitchPreferenceCompat.Material"
+        tools:ignore="ResourceCycle">
+        <item name="widgetLayout">@layout/preference_switch</item>
+    </style>
+
+    <style name="TorrentPlayer.PreferenceOverlay"
+        parent="@style/PreferenceThemeOverlay.v14.Material">
+        <item name="android:iconTint">?attr/colorPrimary</item>
     </style>
 
 </resources>

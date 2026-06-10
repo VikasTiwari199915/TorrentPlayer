@@ -1,6 +1,8 @@
 package com.vikas.torrentplayer.ui.settings;
 
 import android.content.SharedPreferences;
+import android.content.res.TypedArray;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.View;
@@ -9,11 +11,13 @@ import android.widget.FrameLayout;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.graphics.drawable.DrawableCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
+import androidx.preference.PreferenceGroup;
 
 import android.content.Intent;
 import android.net.Uri;
@@ -46,6 +50,10 @@ public class SettingsFragment extends PreferenceFragmentCompat
     public void onCreatePreferences(@Nullable Bundle savedInstanceState, @Nullable String rootKey) {
         setPreferencesFromResource(R.xml.preferences, rootKey);
         prefs = new PrefsManager(requireContext());
+        try (TypedArray ta = requireContext().getTheme().obtainStyledAttributes(
+                new int[] { androidx.appcompat.R.attr.colorPrimary })) {
+            tintIcons(getPreferenceScreen(), ta.getColor(0, 0));
+        }
 
         Preference apiKey = findPreference(PrefsManager.KEY_API_KEY);
         if (apiKey != null) {
@@ -120,6 +128,22 @@ public class SettingsFragment extends PreferenceFragmentCompat
                 runManualUpdateCheck();
                 return true;
             });
+        }
+    }
+
+    private static void tintIcons(@Nullable Preference preference, int color) {
+        if (preference == null || color == 0) return;
+        Drawable icon = preference.getIcon();
+        if (icon != null) {
+            Drawable tinted = DrawableCompat.wrap(icon.mutate());
+            DrawableCompat.setTint(tinted, color);
+            preference.setIcon(tinted);
+        }
+        if (preference instanceof PreferenceGroup) {
+            PreferenceGroup group = (PreferenceGroup) preference;
+            for (int i = 0; i < group.getPreferenceCount(); i++) {
+                tintIcons(group.getPreference(i), color);
+            }
         }
     }
 
