@@ -18,11 +18,20 @@
         android:layout_width="0dp"
         android:layout_height="1dp" />
 
+    <TextView
+        android:id="@+id/expander"
+        android:layout_width="24dp"
+        android:layout_height="32dp"
+        android:gravity="center"
+        android:textAppearance="?attr/textAppearanceTitleMedium"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        tools:text="-" />
+
     <ImageView
         android:id="@+id/icon"
         android:layout_width="22dp"
         android:layout_height="22dp"
-        android:layout_marginStart="12dp"
+        android:layout_marginStart="4dp"
         android:src="@drawable/rounded_docs_24"
         android:contentDescription="@null" />
 

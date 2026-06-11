@@ -6,6 +6,7 @@ import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -17,15 +18,7 @@ import com.vikas.torrentplayer.service.TorrentDownloadService;
 import com.vikas.torrentplayer.torrent.TorrentManager;
 import com.vikas.torrentplayer.utils.FormatUtils;
 
-import org.libtorrent4j.PartialPieceInfo;
-import org.libtorrent4j.Priority;
-import org.libtorrent4j.TorrentHandle;
-import org.libtorrent4j.TorrentInfo;
-
-import java.util.HashSet;
-import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 public class DetailsPiecesFragment extends Fragment {
 
@@ -42,6 +35,7 @@ public class DetailsPiecesFragment extends Fragment {
 
     private FragmentDetailsPiecesBinding b;
     private String hash;
+    private boolean statsRequestPending;
     private final Handler poller = new Handler(Looper.getMainLooper());
     private final Runnable refresh = new Runnable() {
         @Override public void run() {
@@ -79,80 +73,35 @@ public class DetailsPiecesFragment extends Fragment {
     @Override public void onPause() { super.onPause(); poller.removeCallbacks(refresh); }
 
     private void refresh() {
-        TorrentInfo ti = TorrentManager.get().torrentInfoFor(hash);
-        TorrentHandle th = TorrentManager.get().handleFor(hash);
-        if (ti == null || !ti.isValid() || th == null) {
-            b.piecesSummary.setText("Waiting for metadata…");
-            return;
-        }
-        int total = ti.numPieces();
-        int[] states = new int[total];
-        int have = 0;
-        int skipped = 0;
-        int missingCount = 0;
-        StringBuilder missing = new StringBuilder();
-        for (int i = 0; i < total; i++) {
-            boolean h = th.havePiece(i);
-            if (h) {
-                states[i] = 1;
-                have++;
-            } else if (isIgnored(th, i)) {
-                states[i] = 3;
-                skipped++;
-            } else {
-                missingCount++;
-                if (missing.length() < 180) {
-                    if (missing.length() > 0) missing.append(", ");
-                    missing.append(i);
-                }
+        if (statsRequestPending || b == null) return;
+        statsRequestPending = true;
+        TorrentManager.get().loadPieceStats(hash, stats -> {
+            statsRequestPending = false;
+            if (b == null) return;
+            if (stats == null) {
+                setTextIfChanged(b.piecesSummary, "Waiting for metadata…");
+                return;
             }
-        }
-
-        int active = 0;
-        try {
-            List<PartialPieceInfo> queue = th.getDownloadQueue();
-            Set<Integer> activePieces = new HashSet<>();
-            if (queue != null) {
-                for (PartialPieceInfo p : queue) {
-                    int idx = p.pieceIndex();
-                    if (idx >= 0 && idx < total && states[idx] == 0) {
-                        states[idx] = 2;
-                        activePieces.add(idx);
-                    }
-                }
-            }
-            active = activePieces.size();
-        } catch (Throwable ignored) {}
-
-        int available = -1;
-        int rareMissing = 0;
-        try {
-            int[] availability = th.pieceAvailability();
-            if (availability != null) {
-                available = 0;
-                for (int i = 0; i < Math.min(total, availability.length); i++) {
-                    if (availability[i] > 0) available++;
-                    else if (states[i] == 0) rareMissing++;
-                }
-            }
-        } catch (Throwable ignored) {}
-
-        b.pieceMap.setPieceStates(states);
-        b.piecesSummary.setText(have + " / " + total + " pieces  ·  "
-                + FormatUtils.humanBytes(ti.pieceLength()) + " each");
-        String availabilityText = available >= 0 ? String.valueOf(available) : "—";
-        b.piecesDetail.setText(String.format(Locale.US,
-                "Missing: %d  ·  Active: %d  ·  Skipped: %d  ·  Available from peers: %s  ·  Unavailable missing: %d",
-                missingCount, active, skipped, availabilityText, rareMissing));
-        b.missingPieces.setText(missingCount == 0
-                ? "All wanted pieces are complete."
-                : "Missing indexes: " + missing
-                        + (missing.length() >= 180 ? "…" : ""));
+            int total = stats.states.length;
+            b.pieceMap.setPieceStates(stats.states);
+            setTextIfChanged(b.piecesSummary,
+                    stats.have + " / " + total + " pieces  ·  "
+                            + FormatUtils.humanBytes(stats.pieceLength) + " each");
+            String availabilityText =
+                    stats.available >= 0 ? String.valueOf(stats.available) : "—";
+            setTextIfChanged(b.piecesDetail, String.format(Locale.US,
+                    "Missing: %d  ·  Active: %d  ·  Skipped: %d  ·  Available from peers: %s  ·  Unavailable missing: %d",
+                    stats.missing, stats.active, stats.skipped, availabilityText,
+                    stats.unavailableMissing));
+            setTextIfChanged(b.missingPieces, stats.missing == 0
+                    ? "All wanted pieces are complete."
+                    : "Missing indexes: " + stats.missingIndexes
+                            + (stats.missingIndexesTruncated ? "…" : ""));
+        });
     }
 
-    private boolean isIgnored(TorrentHandle th, int piece) {
-        try { return th.piecePriority(piece) == Priority.IGNORE; }
-        catch (Throwable ignored) { return false; }
+    private static void setTextIfChanged(TextView view, String value) {
+        if (!value.contentEquals(view.getText())) view.setText(value);
     }
 
     @Override

@@ -26,6 +26,7 @@ import com.vikas.torrentplayer.utils.PrefsManager;
 
 import org.libtorrent4j.AlertListener;
 import org.libtorrent4j.FileStorage;
+import org.libtorrent4j.PartialPieceInfo;
 import org.libtorrent4j.Priority;
 import org.libtorrent4j.SessionHandle;
 import org.libtorrent4j.SessionManager;
@@ -53,6 +54,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.Collections;
@@ -867,6 +869,121 @@ public class TorrentManager {
             } catch (Throwable t) {
                 Log.w(TAG, "loadFileStats failed for " + key, t);
                 main.post(() -> callback.onFileStats(null));
+            }
+        });
+    }
+
+    public interface PieceStatsCallback {
+        void onPieceStats(@Nullable PieceStats stats);
+    }
+
+    /** Immutable piece-map snapshot built off the main thread. */
+    public static class PieceStats {
+        public final int[] states;
+        public final int have;
+        public final int skipped;
+        public final int missing;
+        public final int active;
+        public final int available;
+        public final int unavailableMissing;
+        public final int pieceLength;
+        public final String missingIndexes;
+        public final boolean missingIndexesTruncated;
+
+        PieceStats(int[] states, int have, int skipped, int missing, int active,
+                   int available, int unavailableMissing, int pieceLength,
+                   String missingIndexes, boolean missingIndexesTruncated) {
+            this.states = states;
+            this.have = have;
+            this.skipped = skipped;
+            this.missing = missing;
+            this.active = active;
+            this.available = available;
+            this.unavailableMissing = unavailableMissing;
+            this.pieceLength = pieceLength;
+            this.missingIndexes = missingIndexes;
+            this.missingIndexesTruncated = missingIndexesTruncated;
+        }
+    }
+
+    /**
+     * Builds the complete piece-map snapshot on the session executor. Large
+     * torrents can have thousands of pieces, so none of these JNI calls belong
+     * on the UI thread.
+     */
+    public void loadPieceStats(@Nullable String infoHash, @NonNull PieceStatsCallback callback) {
+        if (infoHash == null || infoHash.isEmpty()) {
+            main.post(() -> callback.onPieceStats(null));
+            return;
+        }
+        String key = infoHash.toLowerCase(Locale.US);
+        TorrentRecord rec = records.get(key);
+        if (rec == null || rec.hash == null || rec.info == null || session == null) {
+            main.post(() -> callback.onPieceStats(null));
+            return;
+        }
+        final Sha1Hash hash = rec.hash;
+        final TorrentInfo info = rec.info;
+        io.execute(() -> {
+            TorrentHandle th = session.find(hash);
+            if (th == null || !th.isValid()) {
+                main.post(() -> callback.onPieceStats(null));
+                return;
+            }
+            try {
+                int total = info.numPieces();
+                int[] states = new int[total];
+                int have = 0;
+                int skipped = 0;
+                int missing = 0;
+                StringBuilder missingIndexes = new StringBuilder();
+                for (int i = 0; i < total; i++) {
+                    if (th.havePiece(i)) {
+                        states[i] = 1;
+                        have++;
+                    } else if (th.piecePriority(i) == Priority.IGNORE) {
+                        states[i] = 3;
+                        skipped++;
+                    } else {
+                        missing++;
+                        if (missingIndexes.length() < 180) {
+                            if (missingIndexes.length() > 0) missingIndexes.append(", ");
+                            missingIndexes.append(i);
+                        }
+                    }
+                }
+
+                Set<Integer> activePieces = new HashSet<>();
+                List<PartialPieceInfo> queue = th.getDownloadQueue();
+                if (queue != null) {
+                    for (PartialPieceInfo piece : queue) {
+                        int index = piece.pieceIndex();
+                        if (index >= 0 && index < total && states[index] == 0) {
+                            states[index] = 2;
+                            activePieces.add(index);
+                        }
+                    }
+                }
+
+                int available = -1;
+                int unavailableMissing = 0;
+                int[] availability = th.pieceAvailability();
+                if (availability != null) {
+                    available = 0;
+                    for (int i = 0; i < Math.min(total, availability.length); i++) {
+                        if (availability[i] > 0) available++;
+                        else if (states[i] == 0) unavailableMissing++;
+                    }
+                }
+
+                PieceStats stats = new PieceStats(
+                        states, have, skipped, missing, activePieces.size(), available,
+                        unavailableMissing, info.pieceLength(), missingIndexes.toString(),
+                        missingIndexes.length() >= 180);
+                main.post(() -> callback.onPieceStats(stats));
+            } catch (Throwable t) {
+                Log.w(TAG, "loadPieceStats failed for " + key, t);
+                main.post(() -> callback.onPieceStats(null));
             }
         });
     }

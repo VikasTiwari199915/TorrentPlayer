@@ -9,6 +9,8 @@ import android.view.View;
 
 import androidx.annotation.Nullable;
 
+import java.util.Arrays;
+
 /**
  * Renders a torrent's piece status as a compact grid: complete, active, or
  * missing. Cheap, fast, all on the UI thread.
@@ -44,20 +46,23 @@ public class PieceBitmapView extends View {
     }
 
     public void setPieces(boolean[] pieces) {
+        int[] next;
         if (pieces == null) {
-            states = new int[0];
+            next = new int[0];
         } else {
-            states = new int[pieces.length];
-            for (int i = 0; i < pieces.length; i++) states[i] = pieces[i] ? 1 : 0;
+            next = new int[pieces.length];
+            for (int i = 0; i < pieces.length; i++) next[i] = pieces[i] ? 1 : 0;
         }
-        requestLayout();
-        invalidate();
+        setPieceStates(next);
     }
 
     /** 0 = missing, 1 = complete, 2 = active/requested/downloading, 3 = skipped. */
     public void setPieceStates(int[] states) {
-        this.states = states == null ? new int[0] : states;
-        requestLayout();
+        int[] next = states == null ? new int[0] : states;
+        if (Arrays.equals(this.states, next)) return;
+        boolean sizeChanged = this.states.length != next.length;
+        this.states = Arrays.copyOf(next, next.length);
+        if (sizeChanged) requestLayout();
         invalidate();
     }
 
