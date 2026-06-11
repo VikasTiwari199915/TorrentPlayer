@@ -15,6 +15,9 @@ import androidx.annotation.Nullable;
  */
 public class PieceBitmapView extends View {
 
+    private static final int CELL_DP = 5;
+    private static final int GAP_DP = 1;
+
     private int[] states = new int[0];
     private final Paint donePaint = new Paint();
     private final Paint activePaint = new Paint();
@@ -47,38 +50,54 @@ public class PieceBitmapView extends View {
             states = new int[pieces.length];
             for (int i = 0; i < pieces.length; i++) states[i] = pieces[i] ? 1 : 0;
         }
+        requestLayout();
         invalidate();
     }
 
     /** 0 = missing, 1 = complete, 2 = active/requested/downloading, 3 = skipped. */
     public void setPieceStates(int[] states) {
         this.states = states == null ? new int[0] : states;
+        requestLayout();
         invalidate();
+    }
+
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        int fallbackWidth = dp(320) + getPaddingLeft() + getPaddingRight();
+        int width = resolveSize(Math.max(getSuggestedMinimumWidth(), fallbackWidth),
+                widthMeasureSpec);
+        int columns = columnsForWidth(width);
+        int rows = states.length == 0
+                ? 1
+                : (int) Math.ceil(states.length / (double) columns);
+        int contentHeight = rows * dp(CELL_DP) + Math.max(0, rows - 1) * dp(GAP_DP);
+        int desiredHeight = getPaddingTop() + contentHeight + getPaddingBottom();
+        desiredHeight = Math.max(desiredHeight, getSuggestedMinimumHeight());
+        setMeasuredDimension(width, resolveSize(desiredHeight, heightMeasureSpec));
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         int total = states.length;
-        int w = getWidth();
-        int h = getHeight();
+        int contentLeft = getPaddingLeft();
+        int contentTop = getPaddingTop();
+        int w = getWidth() - getPaddingLeft() - getPaddingRight();
+        int h = getHeight() - getPaddingTop() - getPaddingBottom();
         if (total == 0 || w == 0 || h == 0) {
-            canvas.drawRect(0, 0, w, h, todoPaint);
+            canvas.drawRect(contentLeft, contentTop, contentLeft + w, contentTop + h,
+                    todoPaint);
             return;
         }
 
-        int columns = Math.max(24, Math.min(96, w / dp(5)));
-        int rows = (int) Math.ceil(total / (double) columns);
-        float gap = dp(1);
-        float cellW = (w - gap * (columns - 1)) / columns;
-        float cellH = Math.max(dp(3), (h - gap * (rows - 1)) / Math.max(1, rows));
+        int columns = columnsForWidth(getWidth());
+        float gap = dp(GAP_DP);
+        float cellSize = dp(CELL_DP);
         for (int i = 0; i < total; i++) {
             int row = i / columns;
             int col = i % columns;
-            float left = col * (cellW + gap);
-            float top = row * (cellH + gap);
-            float bottom = Math.min(h, top + cellH);
-            if (top >= h) break;
+            float left = contentLeft + col * (cellSize + gap);
+            float top = contentTop + row * (cellSize + gap);
             Paint p;
             switch (states[i]) {
                 case 2: p = activePaint; break;
@@ -87,8 +106,14 @@ public class PieceBitmapView extends View {
                 case 0:
                 default: p = todoPaint; break;
             }
-            canvas.drawRect(left, top, left + cellW, bottom, p);
+            canvas.drawRect(left, top, left + cellSize, top + cellSize, p);
         }
+    }
+
+    private int columnsForWidth(int measuredWidth) {
+        int available = Math.max(dp(CELL_DP),
+                measuredWidth - getPaddingLeft() - getPaddingRight());
+        return Math.max(1, (available + dp(GAP_DP)) / (dp(CELL_DP) + dp(GAP_DP)));
     }
 
     private int dp(int value) {
