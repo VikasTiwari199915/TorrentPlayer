@@ -131,6 +131,17 @@
     <string name="tab_trackers">Trackers</string>
     <string name="tab_peers">Peers</string>
 
+    <!-- Search discovery -->
+    <string name="section_trending_today">Trending Today</string>
+    <string name="section_popular_movies">Popular Movies</string>
+    <string name="section_popular_shows">Popular Shows</string>
+    <string name="section_now_playing">Now Playing</string>
+    <string name="section_upcoming_movies">Upcoming Movies</string>
+    <string name="section_on_the_air">On the Air</string>
+    <string name="search_tmdb_key_missing">Add a TMDB read token or API key in Settings to browse movies and shows here.</string>
+    <string name="search_discovery_error">Couldn’t load TMDB recommendations.</string>
+    <string name="search_discovery_empty">No discovery titles are available right now.</string>
+
     <!-- Storage settings -->
     <string name="pref_cat_storage">Storage</string>
     <string name="pref_save_dir_title">Download folder</string>

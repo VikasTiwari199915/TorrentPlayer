@@ -18,13 +18,24 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.google.android.material.search.SearchView;
 import com.vikas.torrentplayer.R;
 import com.vikas.torrentplayer.databinding.FragmentSearchBinding;
+import com.vikas.torrentplayer.databinding.ViewSearchDiscoverySectionBinding;
 import com.vikas.torrentplayer.ui.detail.DetailActivity;
+import com.vikas.torrentplayer.ui.discover.PosterAdapter;
+
+import java.util.EnumMap;
+import java.util.Map;
 
 public class SearchFragment extends Fragment {
 
     private FragmentSearchBinding b;
     private SearchViewModel vm;
+    private SearchDiscoveryViewModel discoveryVm;
     private SearchAdapter adapter;
+    private SearchViewModel.UiState searchState = SearchViewModel.UiState.IDLE;
+    private final Map<SearchDiscoveryViewModel.Category, PosterAdapter> discoveryAdapters =
+            new EnumMap<>(SearchDiscoveryViewModel.Category.class);
+    private final Map<SearchDiscoveryViewModel.Category, ViewSearchDiscoverySectionBinding>
+            discoverySections = new EnumMap<>(SearchDiscoveryViewModel.Category.class);
 
     @Nullable
     @Override
@@ -38,6 +49,7 @@ public class SearchFragment extends Fragment {
         super.onViewCreated(v, savedInstanceState);
 
         vm = new ViewModelProvider(this).get(SearchViewModel.class);
+        discoveryVm = new ViewModelProvider(this).get(SearchDiscoveryViewModel.class);
 
         adapter = new SearchAdapter(item ->
                 DetailActivity.start(requireContext(), item));
@@ -55,10 +67,12 @@ public class SearchFragment extends Fragment {
         });
 
         b.swipe.setOnRefreshListener(() -> {
-            b.searchBar.getText();
             String q = b.searchBar.getText().toString();
             if (!q.isEmpty()) vm.search(q);
-            else b.swipe.setRefreshing(false);
+            else {
+                discoveryVm.load(true);
+                b.swipe.setRefreshing(false);
+            }
         });
 
         // Wire up SearchBar -> SearchView (Material 3 search UX)
@@ -104,11 +118,76 @@ public class SearchFragment extends Fragment {
         // Observe state
         vm.results().observe(getViewLifecycleOwner(), list -> adapter.submitList(list));
         vm.state().observe(getViewLifecycleOwner(), this::renderState);
+
+        setupDiscoverySections();
+        discoveryVm.state().observe(getViewLifecycleOwner(), ignored -> renderIdleState());
+        discoveryVm.load(false);
+    }
+
+    private void setupDiscoverySections() {
+        for (SearchDiscoveryViewModel.Category category
+                : SearchDiscoveryViewModel.Category.values()) {
+            ViewSearchDiscoverySectionBinding section =
+                    ViewSearchDiscoverySectionBinding.inflate(
+                            getLayoutInflater(), b.discoveryContainer, true);
+            section.title.setText(titleFor(category));
+
+            PosterAdapter posterAdapter = new PosterAdapter(
+                    item -> DetailActivity.startFromDiscover(requireContext(), item), false);
+            section.recycler.setLayoutManager(new LinearLayoutManager(
+                    requireContext(), LinearLayoutManager.HORIZONTAL, false));
+            section.recycler.setAdapter(posterAdapter);
+            section.recycler.setHasFixedSize(true);
+
+            discoveryAdapters.put(category, posterAdapter);
+            discoverySections.put(category, section);
+
+            discoveryVm.items(category).observe(getViewLifecycleOwner(), list -> {
+                posterAdapter.submitList(list);
+                updateSectionVisibility(category);
+            });
+            discoveryVm.loading(category).observe(getViewLifecycleOwner(), loading -> {
+                section.progress.setVisibility(Boolean.TRUE.equals(loading)
+                        ? View.VISIBLE : View.GONE);
+                updateSectionVisibility(category);
+            });
+        }
+    }
+
+    private int titleFor(SearchDiscoveryViewModel.Category category) {
+        switch (category) {
+            case POPULAR_MOVIES: return R.string.section_popular_movies;
+            case POPULAR_SHOWS: return R.string.section_popular_shows;
+            case NOW_PLAYING: return R.string.section_now_playing;
+            case UPCOMING: return R.string.section_upcoming_movies;
+            case ON_THE_AIR: return R.string.section_on_the_air;
+            case TRENDING:
+            default: return R.string.section_trending_today;
+        }
+    }
+
+    private void updateSectionVisibility(SearchDiscoveryViewModel.Category category) {
+        ViewSearchDiscoverySectionBinding section = discoverySections.get(category);
+        PosterAdapter posterAdapter = discoveryAdapters.get(category);
+        if (section == null || posterAdapter == null) return;
+        Boolean loading = discoveryVm.loading(category).getValue();
+        section.getRoot().setVisibility(
+                Boolean.TRUE.equals(loading) || posterAdapter.getItemCount() > 0
+                        ? View.VISIBLE : View.GONE);
     }
 
     private void renderState(SearchViewModel.UiState state) {
+        searchState = state;
         b.swipe.setRefreshing(state == SearchViewModel.UiState.LOADING
                 && (adapter.getItemCount() > 0));
+        if (state == SearchViewModel.UiState.IDLE) {
+            b.recycler.setVisibility(View.GONE);
+            renderIdleState();
+            return;
+        }
+
+        b.searchDiscovery.setVisibility(View.GONE);
+        b.recycler.setVisibility(View.VISIBLE);
         switch (state) {
             case LOADING:
                 if (adapter.getItemCount() == 0) {
@@ -140,17 +219,55 @@ public class SearchFragment extends Fragment {
                 break;
             case IDLE:
             default:
-                b.swipe.setRefreshing(false);
+                break;
+        }
+    }
+
+    private void renderIdleState() {
+        if (b == null || searchState != SearchViewModel.UiState.IDLE) return;
+        b.swipe.setRefreshing(false);
+        SearchDiscoveryViewModel.State state = discoveryVm.state().getValue();
+        if (state == null) state = SearchDiscoveryViewModel.State.IDLE;
+        switch (state) {
+            case NO_CREDENTIAL:
+                b.searchDiscovery.setVisibility(View.GONE);
                 b.emptyTitle.setText(R.string.search_empty_title);
-                b.emptySubtitle.setText(R.string.search_empty_subtitle);
+                b.emptySubtitle.setText(R.string.search_tmdb_key_missing);
                 b.emptyState.setVisibility(View.VISIBLE);
+                break;
+            case ERROR:
+                b.searchDiscovery.setVisibility(View.GONE);
+                b.emptyTitle.setText(R.string.search_error);
+                b.emptySubtitle.setText(R.string.search_discovery_error);
+                b.emptyState.setVisibility(View.VISIBLE);
+                break;
+            case EMPTY:
+                b.searchDiscovery.setVisibility(View.GONE);
+                b.emptyTitle.setText(R.string.search_empty_title);
+                b.emptySubtitle.setText(R.string.search_discovery_empty);
+                b.emptyState.setVisibility(View.VISIBLE);
+                break;
+            case IDLE:
+            case LOADING:
+            case CONTENT:
+            default:
+                b.emptyState.setVisibility(View.GONE);
+                b.searchDiscovery.setVisibility(View.VISIBLE);
                 break;
         }
     }
 
     @Override
+    public void onResume() {
+        super.onResume();
+        if (discoveryVm != null) discoveryVm.load(false);
+    }
+
+    @Override
     public void onDestroyView() {
         super.onDestroyView();
+        discoveryAdapters.clear();
+        discoverySections.clear();
         b = null;
     }
 }

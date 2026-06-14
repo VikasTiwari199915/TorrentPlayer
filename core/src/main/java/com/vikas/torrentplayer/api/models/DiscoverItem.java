@@ -91,6 +91,13 @@ public class DiscoverItem implements Serializable {
     public long effectiveId() {
         if (contentId != null && contentId > 0) return contentId;
         if (id != null && id > 0) return id;
+        // TMDB-only discovery cards intentionally have no TorrentClaw id.
+        // A negative namespace keeps RecyclerView identities stable without
+        // allowing DetailViewModel to mistake a TMDB id for a catalogue id.
+        if (tmdbId != null && tmdbId > 0) {
+            // Movie and TV ids are separate TMDB namespaces and may overlap.
+            return isShow() ? Long.MIN_VALUE + tmdbId : -tmdbId;
+        }
         return 0L;
     }
 
