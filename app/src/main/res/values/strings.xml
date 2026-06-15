@@ -154,4 +154,6 @@
     <!-- Misc -->
     <string name="image_poster">Poster</string>
     <string name="image_backdrop">Backdrop</string>
+    <string name="detail_play_trailer">Play trailer</string>
+    <string name="detail_video_open_error">No app can open this video.</string>
 </resources>

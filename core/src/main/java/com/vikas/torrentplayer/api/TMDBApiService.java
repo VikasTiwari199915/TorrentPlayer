@@ -3,6 +3,7 @@ package com.vikas.torrentplayer.api;
 import com.vikas.torrentplayer.api.models.tmdb.TMDBSeasonDetails;
 import com.vikas.torrentplayer.api.models.tmdb.TMDBSeriesDetails;
 import com.vikas.torrentplayer.api.models.tmdb.TMDBDiscoveryResponse;
+import com.vikas.torrentplayer.api.models.tmdb.TMDBVideosResponse;
 
 import retrofit2.Call;
 import retrofit2.http.GET;
@@ -64,6 +65,22 @@ public interface TMDBApiService {
             @Query("api_key") String apiKey,
             @Query("language") String language,
             @Query("page") int page
+    );
+
+    @GET("movie/{movieId}/videos")
+    Call<TMDBVideosResponse> movieVideos(
+            @Header("Authorization") String bearer,
+            @Path("movieId") long movieId,
+            @Query("api_key") String apiKey,
+            @Query("language") String language
+    );
+
+    @GET("tv/{seriesId}/videos")
+    Call<TMDBVideosResponse> showVideos(
+            @Header("Authorization") String bearer,
+            @Path("seriesId") long seriesId,
+            @Query("api_key") String apiKey,
+            @Query("language") String language
     );
 
     @GET("tv/{seriesId}")

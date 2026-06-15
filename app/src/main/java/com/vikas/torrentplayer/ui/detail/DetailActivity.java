@@ -2,6 +2,7 @@ package com.vikas.torrentplayer.ui.detail;
 
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.View;
@@ -25,6 +26,7 @@ import com.vikas.torrentplayer.api.models.TorrentItem;
 import com.vikas.torrentplayer.api.models.tmdb.TMDBEpisode;
 import com.vikas.torrentplayer.api.models.tmdb.TMDBSeasonSummary;
 import com.vikas.torrentplayer.api.models.tmdb.TMDBSeriesDetails;
+import com.vikas.torrentplayer.api.models.tmdb.TMDBVideo;
 import com.vikas.torrentplayer.databinding.ActivityDetailBinding;
 import com.vikas.torrentplayer.service.TorrentDownloadService;
 import com.vikas.torrentplayer.torbox.TorBoxClient;
@@ -77,6 +79,8 @@ public class DetailActivity extends AppCompatActivity {
     private List<TMDBEpisode> episodeChoices = new java.util.ArrayList<>();
     @Nullable private Integer selectedSeason;
     @Nullable private Integer selectedEpisode;
+    @Nullable private SearchResult currentResult;
+    @Nullable private TMDBVideo featuredVideo;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -99,6 +103,7 @@ public class DetailActivity extends AppCompatActivity {
             return;
         }
 
+        currentResult = result;
         bindHeader(result);
         b.episodeSection.setVisibility(result.isShow() ? View.VISIBLE : View.GONE);
         b.btnSeason.setEnabled(false);
@@ -142,8 +147,13 @@ public class DetailActivity extends AppCompatActivity {
         // fallback resolves.
         vm.resultLive().observe(this, r -> {
             if (r == null) return;
+            currentResult = r;
             bindHeader(r);
             b.episodeSection.setVisibility(r.isShow() ? View.VISIBLE : View.GONE);
+        });
+        vm.featuredVideo().observe(this, video -> {
+            featuredVideo = video;
+            renderBackdrop();
         });
         vm.seriesDetails().observe(this, this::renderSeriesDetails);
         vm.seasons().observe(this, list -> {
@@ -169,6 +179,7 @@ public class DetailActivity extends AppCompatActivity {
                         ? View.VISIBLE : View.GONE));
         b.btnSeason.setOnClickListener(v -> showSeasonPicker());
         b.btnEpisode.setOnClickListener(v -> showEpisodePicker());
+        b.playTrailer.setOnClickListener(v -> openFeaturedVideo());
         vm.load(result);
 
         // The AppBarLayout already declares fitsSystemWindows="true", so insets
@@ -265,11 +276,40 @@ public class DetailActivity extends AppCompatActivity {
 
         b.overview.setText(r.overview != null ? r.overview : "—");
 
-        Glide.with(this).load(r.backdropUrl).into(b.backdrop);
+        renderBackdrop();
         Glide.with(this).load(r.posterUrl)
                 .placeholder(R.drawable.placeholder_poster)
                 .error(R.drawable.placeholder_poster)
                 .into(b.poster);
+    }
+
+    private void renderBackdrop() {
+        if (b == null) return;
+        String backdropUrl = currentResult == null ? null : currentResult.backdropUrl;
+        if (featuredVideo != null && featuredVideo.isYouTube()) {
+            Glide.with(this)
+                    .load(featuredVideo.thumbnailUrl())
+                    .error(Glide.with(this).load(backdropUrl))
+                    .into(b.backdrop);
+            b.playTrailer.setContentDescription(
+                    featuredVideo.name == null || featuredVideo.name.trim().isEmpty()
+                            ? getString(R.string.detail_play_trailer)
+                            : featuredVideo.name);
+            b.playTrailer.setVisibility(View.VISIBLE);
+        } else {
+            Glide.with(this).load(backdropUrl).into(b.backdrop);
+            b.playTrailer.setVisibility(View.GONE);
+        }
+    }
+
+    private void openFeaturedVideo() {
+        TMDBVideo video = featuredVideo;
+        if (video == null || !video.isYouTube()) return;
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(video.watchUrl())));
+        } catch (RuntimeException error) {
+            Toast.makeText(this, R.string.detail_video_open_error, Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void renderSeriesDetails(@Nullable TMDBSeriesDetails details) {

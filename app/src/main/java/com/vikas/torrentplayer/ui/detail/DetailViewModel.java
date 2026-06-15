@@ -19,6 +19,8 @@ import com.vikas.torrentplayer.api.models.tmdb.TMDBEpisode;
 import com.vikas.torrentplayer.api.models.tmdb.TMDBSeasonDetails;
 import com.vikas.torrentplayer.api.models.tmdb.TMDBSeasonSummary;
 import com.vikas.torrentplayer.api.models.tmdb.TMDBSeriesDetails;
+import com.vikas.torrentplayer.api.models.tmdb.TMDBVideo;
+import com.vikas.torrentplayer.api.models.tmdb.TMDBVideosResponse;
 import com.vikas.torrentplayer.utils.PrefsManager;
 
 import java.util.ArrayList;
@@ -48,6 +50,7 @@ public class DetailViewModel extends AndroidViewModel {
     private final MutableLiveData<List<TMDBEpisode>> episodes = new MutableLiveData<>(new ArrayList<>());
     private final MutableLiveData<String> episodeMetadataMessage = new MutableLiveData<>(null);
     private final MutableLiveData<Boolean> episodeLoading = new MutableLiveData<>(false);
+    private final MutableLiveData<TMDBVideo> featuredVideo = new MutableLiveData<>(null);
     private final MutableLiveData<Integer> selectedSeason = new MutableLiveData<>(null);
     private final MutableLiveData<Integer> selectedEpisode = new MutableLiveData<>(null);
     private SearchResult result;
@@ -56,6 +59,8 @@ public class DetailViewModel extends AndroidViewModel {
     @Nullable private Call<SearchResponse> searchCall;
     @Nullable private Call<TMDBSeriesDetails> tmdbSeriesCall;
     @Nullable private Call<TMDBSeasonDetails> tmdbSeasonCall;
+    @Nullable private Call<TMDBVideosResponse> tmdbVideosCall;
+    @Nullable private String loadedVideoKey;
 
     public DetailViewModel(@NonNull Application app) {
         super(app);
@@ -73,13 +78,17 @@ public class DetailViewModel extends AndroidViewModel {
     public LiveData<List<TMDBEpisode>> episodes() { return episodes; }
     public LiveData<String> episodeMetadataMessage() { return episodeMetadataMessage; }
     public LiveData<Boolean> episodeLoading() { return episodeLoading; }
+    public LiveData<TMDBVideo> featuredVideo() { return featuredVideo; }
     public LiveData<Integer> selectedSeason() { return selectedSeason; }
     public LiveData<Integer> selectedEpisode() { return selectedEpisode; }
     public SearchResult result() { return result; }
 
     public void load(SearchResult initial) {
+        cancelInFlight();
+        loadedVideoKey = null;
         this.result = initial;
         resultLive.setValue(initial);
+        loadVideosIfNeeded(initial);
         loadSeriesDetailsIfNeeded(initial);
 
         // If we already have torrents from the search response, surface them now.
@@ -93,7 +102,6 @@ public class DetailViewModel extends AndroidViewModel {
             return;
         }
         state.setValue(UiState.LOADING);
-        cancelInFlight();
         searchByTitle(initial);
     }
 
@@ -140,6 +148,7 @@ public class DetailViewModel extends AndroidViewModel {
                 mergeInto(best, initial);
                 DetailViewModel.this.result = best;
                 resultLive.setValue(best);
+                loadVideosIfNeeded(best);
                 loadSeriesDetailsIfNeeded(best);
                 publish(best.torrents);
             }
@@ -258,6 +267,58 @@ public class DetailViewModel extends AndroidViewModel {
         });
     }
 
+    private void loadVideosIfNeeded(@Nullable SearchResult r) {
+        if (r == null || r.tmdbId == null || r.tmdbId <= 0) return;
+        String credential = prefs.getTmdbCredential();
+        if (credential == null || credential.trim().isEmpty()) return;
+
+        String requestKey = (r.isShow() ? "show:" : "movie:") + r.tmdbId;
+        if (requestKey.equals(loadedVideoKey)) return;
+        loadedVideoKey = requestKey;
+        if (tmdbVideosCall != null) tmdbVideosCall.cancel();
+        featuredVideo.setValue(null);
+
+        tmdbVideosCall = r.isShow()
+                ? tmdb.showVideos(tmdbBearer(credential), r.tmdbId,
+                        tmdbApiKey(credential), "en-US")
+                : tmdb.movieVideos(tmdbBearer(credential), r.tmdbId,
+                        tmdbApiKey(credential), "en-US");
+        tmdbVideosCall.enqueue(new Callback<TMDBVideosResponse>() {
+            @Override public void onResponse(@NonNull Call<TMDBVideosResponse> call,
+                                             @NonNull Response<TMDBVideosResponse> response) {
+                if (call.isCanceled()) return;
+                if (!response.isSuccessful() || response.body() == null) return;
+                featuredVideo.setValue(selectFeaturedVideo(response.body().results));
+            }
+
+            @Override public void onFailure(@NonNull Call<TMDBVideosResponse> call,
+                                            @NonNull Throwable error) {
+                if (!call.isCanceled()) Log.w(TAG, "TMDB videos request failed", error);
+            }
+        });
+    }
+
+    @Nullable
+    private static TMDBVideo selectFeaturedVideo(@Nullable List<TMDBVideo> videos) {
+        if (videos == null || videos.isEmpty()) return null;
+        TMDBVideo best = null;
+        int bestScore = Integer.MIN_VALUE;
+        for (TMDBVideo video : videos) {
+            if (video == null || !video.isYouTube()) continue;
+            int score = video.official ? 1000 : 0;
+            if ("Trailer".equalsIgnoreCase(video.type)) score += 500;
+            else if ("Teaser".equalsIgnoreCase(video.type)) score += 350;
+            else if ("Clip".equalsIgnoreCase(video.type)) score += 200;
+            else if ("Featurette".equalsIgnoreCase(video.type)) score += 150;
+            score += Math.min(video.size, 2160) / 10;
+            if (score > bestScore) {
+                best = video;
+                bestScore = score;
+            }
+        }
+        return best;
+    }
+
     private void loadSeasonEpisodes(int season) {
         SearchResult r = result;
         String credential = prefs.getTmdbCredential();
@@ -359,6 +420,7 @@ public class DetailViewModel extends AndroidViewModel {
         if (searchCall != null) { searchCall.cancel(); searchCall = null; }
         if (tmdbSeriesCall != null) { tmdbSeriesCall.cancel(); tmdbSeriesCall = null; }
         if (tmdbSeasonCall != null) { tmdbSeasonCall.cancel(); tmdbSeasonCall = null; }
+        if (tmdbVideosCall != null) { tmdbVideosCall.cancel(); tmdbVideosCall = null; }
     }
 
     @Override

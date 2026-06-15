@@ -23,6 +23,7 @@ import com.vikas.torrentplayer.ui.detail.DetailActivity;
 import com.vikas.torrentplayer.ui.discover.PosterAdapter;
 
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 
 public class SearchFragment extends Fragment {
@@ -168,11 +169,11 @@ public class SearchFragment extends Fragment {
 
     private void updateSectionVisibility(SearchDiscoveryViewModel.Category category) {
         ViewSearchDiscoverySectionBinding section = discoverySections.get(category);
-        PosterAdapter posterAdapter = discoveryAdapters.get(category);
-        if (section == null || posterAdapter == null) return;
+        if (section == null) return;
         Boolean loading = discoveryVm.loading(category).getValue();
+        List<?> items = discoveryVm.items(category).getValue();
         section.getRoot().setVisibility(
-                Boolean.TRUE.equals(loading) || posterAdapter.getItemCount() > 0
+                Boolean.TRUE.equals(loading) || (items != null && !items.isEmpty())
                         ? View.VISIBLE : View.GONE);
     }
 
