@@ -8,24 +8,32 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.webkit.WebChromeClient;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
+import android.widget.SeekBar;
 import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
+import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.viewpager2.widget.ViewPager2;
 
 import com.bumptech.glide.Glide;
+import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.vikas.torrentplayer.R;
 import com.vikas.torrentplayer.api.models.DiscoverItem;
@@ -87,6 +95,7 @@ public class DetailActivity extends AppCompatActivity {
     private ActivityDetailBinding b;
     private DetailViewModel vm;
     private TorrentAdapter adapter;
+    private DetailMediaPagerAdapter mediaAdapter;
     private List<TMDBSeasonSummary> seasonChoices = new java.util.ArrayList<>();
     private List<TMDBEpisode> episodeChoices = new java.util.ArrayList<>();
     @Nullable private Integer selectedSeason;
@@ -97,6 +106,20 @@ public class DetailActivity extends AppCompatActivity {
     private final Runnable autoplayTrailer = this::startInlineTrailer;
     private boolean trailerPlaying;
     private boolean trailerEmbedFailed;
+    private boolean pendingTrailerStart;
+    private boolean userSeeking;
+    private boolean trailerMuted = true;
+    private double trailerDuration;
+    @Nullable private WebView trailerWebView;
+    @Nullable private ViewGroup trailerSurface;
+    @Nullable private MaterialButton trailerMute;
+    @Nullable private MaterialButton trailerFullscreen;
+    @Nullable private SeekBar trailerProgress;
+    @Nullable private FrameLayout fullscreenOverlay;
+    @Nullable private ViewGroup trailerNormalParent;
+    @Nullable private ViewGroup.LayoutParams trailerNormalLayoutParams;
+    private int trailerNormalIndex;
+    private float trailerTouchDownX;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -112,7 +135,14 @@ public class DetailActivity extends AppCompatActivity {
             getSupportActionBar().setDisplayShowTitleEnabled(false);
         }
         b.toolbar.setNavigationOnClickListener(v -> finish());
-        configureTrailerPlayer();
+        setupMediaPager();
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (fullscreenOverlay != null) exitTrailerFullscreen();
+                else finish();
+            }
+        });
 
         SearchResult result = (SearchResult) getIntent().getSerializableExtra(EXTRA_RESULT);
         if (result == null) {
@@ -203,10 +233,6 @@ public class DetailActivity extends AppCompatActivity {
                         ? View.VISIBLE : View.GONE));
         b.btnSeason.setOnClickListener(v -> showSeasonPicker());
         b.btnEpisode.setOnClickListener(v -> showEpisodePicker());
-        b.playTrailer.setOnClickListener(v -> {
-            if (trailerEmbedFailed) openFeaturedVideo();
-            else startInlineTrailer();
-        });
         vm.load(result);
 
         // The AppBarLayout already declares fitsSystemWindows="true", so insets
@@ -311,37 +337,98 @@ public class DetailActivity extends AppCompatActivity {
     }
 
     private void renderBackdrop() {
-        if (b == null) return;
-        if (trailerPlaying) return;
+        if (b == null || mediaAdapter == null) return;
         String backdropUrl = currentResult == null ? null : currentResult.backdropUrl;
-        if (featuredVideo != null && featuredVideo.isYouTube()) {
-            Glide.with(this)
-                    .load(featuredVideo.thumbnailUrl())
-                    .error(Glide.with(this).load(backdropUrl))
-                    .into(b.backdrop);
-            b.playTrailer.setContentDescription(
-                    featuredVideo.name == null || featuredVideo.name.trim().isEmpty()
-                            ? getString(R.string.detail_play_trailer)
-                            : featuredVideo.name);
-            b.playTrailer.setVisibility(View.VISIBLE);
-        } else {
-            Glide.with(this).load(backdropUrl).into(b.backdrop);
-            b.playTrailer.setVisibility(View.GONE);
-        }
+        boolean hasTrailer = featuredVideo != null && featuredVideo.isYouTube();
+        mediaAdapter.setBackdropUrl(backdropUrl);
+        mediaAdapter.setHasTrailer(hasTrailer);
+        b.mediaPageIndicator.setVisibility(hasTrailer ? View.VISIBLE : View.GONE);
+        updateMediaPageIndicator(b.mediaPager.getCurrentItem());
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
-    private void configureTrailerPlayer() {
-        b.trailerWebview.setWebChromeClient(new WebChromeClient());
-        b.trailerWebview.setWebViewClient(new WebViewClient());
-        b.trailerWebview.getSettings().setJavaScriptEnabled(true);
-        b.trailerWebview.getSettings().setDomStorageEnabled(true);
-        b.trailerWebview.getSettings().setMediaPlaybackRequiresUserGesture(false);
+    private void setupMediaPager() {
+        mediaAdapter = new DetailMediaPagerAdapter(new DetailMediaPagerAdapter.Listener() {
+            @Override
+            public void onPlayTrailer() {
+                if (trailerEmbedFailed) openFeaturedVideo();
+                else startInlineTrailer();
+            }
+
+            @Override
+            public void onTrailerViewsReady(WebView webView, ViewGroup surface,
+                                            MaterialButton mute, SeekBar progress,
+                                            MaterialButton fullscreen) {
+                configureTrailerPlayer(webView, surface, mute, progress, fullscreen);
+            }
+        });
+        b.mediaPager.setAdapter(mediaAdapter);
+        b.mediaPager.setOffscreenPageLimit(1);
+        b.mediaPager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
+            @Override
+            public void onPageSelected(int position) {
+                updateMediaPageIndicator(position);
+                int titleBottomMarginDp = position == 0 ? 16 : 64;
+                b.collapsingToolbar.setExpandedTitleMarginBottom(
+                        Math.round(titleBottomMarginDp
+                                * getResources().getDisplayMetrics().density));
+                if (position == 0) {
+                    evaluateTrailerJavascript("if(window.player){player.pauseVideo();}");
+                } else if (trailerPlaying) {
+                    evaluateTrailerJavascript("if(window.player){player.playVideo();}");
+                }
+            }
+        });
+    }
+
+    @SuppressLint({"SetJavaScriptEnabled", "ClickableViewAccessibility"})
+    private void configureTrailerPlayer(WebView webView, ViewGroup surface,
+                                        MaterialButton mute, SeekBar progress,
+                                        MaterialButton fullscreen) {
+        trailerWebView = webView;
+        trailerSurface = surface;
+        trailerMute = mute;
+        trailerProgress = progress;
+        trailerFullscreen = fullscreen;
+
+        webView.setWebChromeClient(new WebChromeClient());
+        webView.setWebViewClient(new WebViewClient());
+        webView.getSettings().setJavaScriptEnabled(true);
+        webView.getSettings().setDomStorageEnabled(true);
+        webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
-        cookies.setAcceptThirdPartyCookies(b.trailerWebview, true);
-        b.trailerWebview.addJavascriptInterface(
+        cookies.setAcceptThirdPartyCookies(webView, true);
+        webView.addJavascriptInterface(
                 new TrailerJavascriptBridge(), "TorrentPlayer");
+
+        mute.setOnClickListener(v -> evaluateTrailerJavascript(
+                "if(window.player){player.isMuted()?player.unMute():player.mute();}"));
+        fullscreen.setOnClickListener(v -> toggleTrailerFullscreen());
+        progress.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int value, boolean fromUser) {}
+            @Override public void onStartTrackingTouch(SeekBar seekBar) { userSeeking = true; }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+                userSeeking = false;
+                if (trailerDuration <= 0) return;
+                double target = trailerDuration * seekBar.getProgress() / seekBar.getMax();
+                evaluateTrailerJavascript("if(window.player){player.seekTo(" + target + ",true);}");
+            }
+        });
+        webView.setOnTouchListener((view, event) -> {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                trailerTouchDownX = event.getX();
+            } else if (event.getActionMasked() == MotionEvent.ACTION_UP
+                    && event.getX() - trailerTouchDownX > 80f
+                    && fullscreenOverlay == null) {
+                b.mediaPager.setCurrentItem(0, true);
+            }
+            return true;
+        });
+
+        if (pendingTrailerStart) {
+            pendingTrailerStart = false;
+            loadTrailerIntoWebView();
+        }
     }
 
     private void startInlineTrailer() {
@@ -349,10 +436,19 @@ public class DetailActivity extends AppCompatActivity {
         if (b == null || video == null || !video.isYouTube() || trailerPlaying) return;
         trailerHandler.removeCallbacks(autoplayTrailer);
         trailerPlaying = true;
-        b.playTrailer.setVisibility(View.GONE);
-        b.trailerWebview.setVisibility(View.VISIBLE);
+        b.mediaPager.setCurrentItem(1, true);
         b.backdropScrim.setAlpha(0.35f);
+        if (trailerWebView == null) {
+            pendingTrailerStart = true;
+            return;
+        }
+        loadTrailerIntoWebView();
+    }
 
+    private void loadTrailerIntoWebView() {
+        TMDBVideo video = featuredVideo;
+        WebView webView = trailerWebView;
+        if (video == null || webView == null) return;
         String html = "<!doctype html><html><head>"
                 + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
                 + "<meta name=\"referrer\" content=\"strict-origin-when-cross-origin\">"
@@ -360,15 +456,20 @@ public class DetailActivity extends AppCompatActivity {
                 + "background:#000;overflow:hidden}</style></head><body>"
                 + "<div id=\"player\"></div>"
                 + "<script src=\"https://www.youtube.com/iframe_api\"></script>"
-                + "<script>function onYouTubeIframeAPIReady(){new YT.Player('player',{"
+                + "<script>var player;function report(){if(player&&player.getDuration){"
+                + "TorrentPlayer.onProgress(player.getCurrentTime(),player.getDuration(),player.isMuted());}}"
+                + "function onYouTubeIframeAPIReady(){player=new YT.Player('player',{"
                 + "videoId:'" + video.key + "',width:'100%',height:'100%',"
                 + "host:'" + YOUTUBE_EMBED_ORIGIN + "',"
-                + "playerVars:{autoplay:1,mute:1,controls:1,playsinline:1,rel:0,"
+                + "playerVars:{autoplay:1,mute:1,controls:0,disablekb:1,fs:0,playsinline:1,rel:0,"
                 + "origin:'" + YOUTUBE_EMBED_ORIGIN + "'},"
-                + "events:{onReady:function(e){e.target.mute();e.target.playVideo();},"
+                + "events:{onReady:function(e){e.target.mute();e.target.playVideo();"
+                + "TorrentPlayer.onReady(e.target.getDuration(),e.target.isMuted());"
+                + "setInterval(report,500);},"
+                + "onStateChange:function(e){if(e.data===0){TorrentPlayer.onEnded();}},"
                 + "onError:function(e){TorrentPlayer.onPlayerError(String(e.data));}}"
                 + "});}</script></body></html>";
-        b.trailerWebview.loadDataWithBaseURL(
+        webView.loadDataWithBaseURL(
                 TRAILER_PAGE_ORIGIN + "/trailer.html",
                 html, "text/html", "UTF-8", null);
     }
@@ -386,6 +487,25 @@ public class DetailActivity extends AppCompatActivity {
                         R.string.detail_video_embed_error, Toast.LENGTH_LONG).show();
             });
         }
+
+        @JavascriptInterface
+        public void onReady(double duration, boolean muted) {
+            runOnUiThread(() -> updateTrailerProgress(0, duration, muted));
+        }
+
+        @JavascriptInterface
+        public void onProgress(double current, double duration, boolean muted) {
+            runOnUiThread(() -> updateTrailerProgress(current, duration, muted));
+        }
+
+        @JavascriptInterface
+        public void onEnded() {
+            runOnUiThread(() -> {
+                trailerPlaying = false;
+                if (fullscreenOverlay != null) exitTrailerFullscreen();
+                if (b != null) b.mediaPager.setCurrentItem(0, true);
+            });
+        }
     }
 
     private void openFeaturedVideo() {
@@ -400,11 +520,101 @@ public class DetailActivity extends AppCompatActivity {
 
     private void stopInlineTrailer() {
         trailerPlaying = false;
-        if (b == null) return;
-        b.trailerWebview.stopLoading();
-        b.trailerWebview.loadUrl("about:blank");
-        b.trailerWebview.setVisibility(View.GONE);
-        b.backdropScrim.setAlpha(1f);
+        pendingTrailerStart = false;
+        WebView webView = trailerWebView;
+        if (webView != null) {
+            webView.stopLoading();
+            webView.loadUrl("about:blank");
+        }
+        if (b != null) {
+            b.backdropScrim.setAlpha(1f);
+            b.mediaPager.setCurrentItem(0, false);
+        }
+    }
+
+    private void updateMediaPageIndicator(int position) {
+        if (b == null || featuredVideo == null || !featuredVideo.isYouTube()) return;
+        b.mediaPageIndicator.setText(position == 0
+                ? R.string.detail_media_page_backdrop
+                : R.string.detail_media_page_trailer);
+    }
+
+    private void evaluateTrailerJavascript(String javascript) {
+        WebView webView = trailerWebView;
+        if (webView != null) webView.evaluateJavascript(javascript, null);
+    }
+
+    private void updateTrailerProgress(double current, double duration, boolean muted) {
+        trailerDuration = Math.max(0, duration);
+        trailerMuted = muted;
+        MaterialButton mute = trailerMute;
+        if (mute != null) {
+            mute.setIconResource(muted
+                    ? R.drawable.rounded_volume_off_24
+                    : R.drawable.rounded_volume_up_24);
+            mute.setContentDescription(getString(muted
+                    ? R.string.detail_trailer_unmute
+                    : R.string.detail_trailer_mute));
+        }
+        SeekBar progress = trailerProgress;
+        if (progress != null && !userSeeking && trailerDuration > 0) {
+            int value = (int) Math.round(
+                    progress.getMax() * Math.max(0, current) / trailerDuration);
+            progress.setProgress(Math.min(progress.getMax(), value));
+        }
+    }
+
+    private void toggleTrailerFullscreen() {
+        if (fullscreenOverlay == null) enterTrailerFullscreen();
+        else exitTrailerFullscreen();
+    }
+
+    private void enterTrailerFullscreen() {
+        ViewGroup surface = trailerSurface;
+        MaterialButton fullscreen = trailerFullscreen;
+        if (surface == null || fullscreen == null || surface.getParent() == null) return;
+
+        trailerNormalParent = (ViewGroup) surface.getParent();
+        trailerNormalIndex = trailerNormalParent.indexOfChild(surface);
+        trailerNormalLayoutParams = surface.getLayoutParams();
+        trailerNormalParent.removeView(surface);
+
+        FrameLayout content = findViewById(android.R.id.content);
+        fullscreenOverlay = new FrameLayout(this);
+        fullscreenOverlay.setBackgroundColor(android.graphics.Color.BLACK);
+        content.addView(fullscreenOverlay, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        fullscreenOverlay.addView(surface, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        fullscreen.setIconResource(R.drawable.rounded_fullscreen_exit_24);
+        fullscreen.setContentDescription(getString(R.string.detail_trailer_exit_fullscreen));
+        new WindowInsetsControllerCompat(getWindow(), getWindow().getDecorView())
+                .hide(WindowInsetsCompat.Type.systemBars());
+    }
+
+    private void exitTrailerFullscreen() {
+        FrameLayout overlay = fullscreenOverlay;
+        ViewGroup surface = trailerSurface;
+        ViewGroup parent = trailerNormalParent;
+        if (overlay == null || surface == null || parent == null) return;
+
+        overlay.removeView(surface);
+        ViewGroup overlayParent = (ViewGroup) overlay.getParent();
+        if (overlayParent != null) overlayParent.removeView(overlay);
+        parent.addView(surface, Math.min(trailerNormalIndex, parent.getChildCount()),
+                trailerNormalLayoutParams);
+        fullscreenOverlay = null;
+        trailerNormalParent = null;
+        trailerNormalLayoutParams = null;
+        if (trailerFullscreen != null) {
+            trailerFullscreen.setIconResource(R.drawable.rounded_fullscreen_24);
+            trailerFullscreen.setContentDescription(
+                    getString(R.string.detail_trailer_fullscreen));
+        }
+        new WindowInsetsControllerCompat(getWindow(), getWindow().getDecorView())
+                .show(WindowInsetsCompat.Type.systemBars());
     }
 
     private void renderSeriesDetails(@Nullable TMDBSeriesDetails details) {
@@ -511,7 +721,7 @@ public class DetailActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         trailerHandler.removeCallbacks(autoplayTrailer);
-        if (b != null) b.trailerWebview.onPause();
+        if (trailerWebView != null) trailerWebView.onPause();
         super.onPause();
     }
 
@@ -519,7 +729,7 @@ public class DetailActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         if (b != null) {
-            b.trailerWebview.onResume();
+            if (trailerWebView != null) trailerWebView.onResume();
             if (!trailerPlaying && featuredVideo != null && featuredVideo.isYouTube()
                     && new PrefsManager(this).isTrailerAutoplayEnabled()) {
                 trailerHandler.removeCallbacks(autoplayTrailer);
@@ -531,13 +741,15 @@ public class DetailActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         trailerHandler.removeCallbacksAndMessages(null);
-        WebView trailer = b == null ? null : b.trailerWebview;
+        if (fullscreenOverlay != null) exitTrailerFullscreen();
+        WebView trailer = trailerWebView;
         if (trailer != null) {
             trailer.stopLoading();
             trailer.loadUrl("about:blank");
             trailer.removeAllViews();
             trailer.destroy();
         }
+        trailerWebView = null;
         super.onDestroy();
         b = null;
     }

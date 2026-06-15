@@ -29,23 +29,13 @@
             app:titleCollapseMode="fade"
             android:fitsSystemWindows="true">
 
-            <ImageView
-                android:id="@+id/backdrop"
+            <androidx.viewpager2.widget.ViewPager2
+                android:id="@+id/media_pager"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:scaleType="centerCrop"
-                android:contentDescription="@string/image_backdrop"
                 app:layout_collapseMode="parallax"
                 app:layout_collapseParallaxMultiplier="0.5"
                 android:fitsSystemWindows="true" />
-
-            <WebView
-                android:id="@+id/trailer_webview"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:background="@android:color/black"
-                android:visibility="gone"
-                app:layout_collapseMode="parallax" />
 
             <View
                 android:id="@+id/backdrop_scrim"
@@ -54,16 +44,20 @@
                 android:background="@drawable/backdrop_scrim"
                 app:layout_collapseMode="parallax" />
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/play_trailer"
-                style="@style/Widget.Material3.Button.IconButton.Filled"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:layout_gravity="center"
-                android:contentDescription="@string/detail_play_trailer"
+            <TextView
+                android:id="@+id/media_page_indicator"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|end"
+                android:layout_marginEnd="12dp"
+                android:layout_marginBottom="60dp"
+                android:background="#66000000"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="3dp"
+                android:text="@string/detail_media_page_backdrop"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
                 android:visibility="gone"
-                app:icon="@drawable/rounded_play_arrow_24"
-                app:iconSize="32dp"
                 app:layout_collapseMode="parallax"
                 tools:visibility="visible" />
 

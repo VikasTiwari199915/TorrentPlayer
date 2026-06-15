@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <FrameLayout
+        android:id="@+id/trailer_surface"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black">
+
+        <WebView
+            android:id="@+id/trailer_webview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@android:color/black" />
+
+        <LinearLayout
+            android:id="@+id/trailer_controls"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_gravity="bottom"
+            android:background="#99000000"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="8dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/trailer_mute"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:contentDescription="@string/detail_trailer_unmute"
+                app:icon="@drawable/rounded_volume_off_24"
+                app:iconTint="@android:color/white" />
+
+            <SeekBar
+                android:id="@+id/trailer_progress"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="4dp"
+                android:layout_weight="1"
+                android:max="1000"
+                android:progressTint="@android:color/white"
+                android:thumbTint="@android:color/white" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/trailer_fullscreen"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:contentDescription="@string/detail_trailer_fullscreen"
+                app:icon="@drawable/rounded_fullscreen_24"
+                app:iconTint="@android:color/white" />
+
+        </LinearLayout>
+    </FrameLayout>
+
+</FrameLayout>
