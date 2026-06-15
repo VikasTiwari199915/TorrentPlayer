@@ -3,13 +3,17 @@ package com.vikas.torrentplayer.ui.detail;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
 import android.view.View;
 import android.webkit.WebChromeClient;
+import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
@@ -47,6 +51,10 @@ import java.util.List;
 public class DetailActivity extends AppCompatActivity {
 
     private static final String EXTRA_RESULT = "extra_result";
+    private static final String TRAILER_PAGE_ORIGIN =
+            "https://com.vikas.torrentplayer";
+    private static final String YOUTUBE_EMBED_ORIGIN =
+            "https://www.youtube-nocookie.com";
 
     public static void start(Context ctx, SearchResult item) {
         Intent i = new Intent(ctx, DetailActivity.class);
@@ -88,6 +96,7 @@ public class DetailActivity extends AppCompatActivity {
     private final Handler trailerHandler = new Handler(Looper.getMainLooper());
     private final Runnable autoplayTrailer = this::startInlineTrailer;
     private boolean trailerPlaying;
+    private boolean trailerEmbedFailed;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -162,6 +171,7 @@ public class DetailActivity extends AppCompatActivity {
         vm.featuredVideo().observe(this, video -> {
             trailerHandler.removeCallbacks(autoplayTrailer);
             stopInlineTrailer();
+            trailerEmbedFailed = false;
             featuredVideo = video;
             renderBackdrop();
             if (video != null && video.isYouTube()
@@ -193,7 +203,10 @@ public class DetailActivity extends AppCompatActivity {
                         ? View.VISIBLE : View.GONE));
         b.btnSeason.setOnClickListener(v -> showSeasonPicker());
         b.btnEpisode.setOnClickListener(v -> showEpisodePicker());
-        b.playTrailer.setOnClickListener(v -> startInlineTrailer());
+        b.playTrailer.setOnClickListener(v -> {
+            if (trailerEmbedFailed) openFeaturedVideo();
+            else startInlineTrailer();
+        });
         vm.load(result);
 
         // The AppBarLayout already declares fitsSystemWindows="true", so insets
@@ -320,9 +333,15 @@ public class DetailActivity extends AppCompatActivity {
     @SuppressLint("SetJavaScriptEnabled")
     private void configureTrailerPlayer() {
         b.trailerWebview.setWebChromeClient(new WebChromeClient());
+        b.trailerWebview.setWebViewClient(new WebViewClient());
         b.trailerWebview.getSettings().setJavaScriptEnabled(true);
         b.trailerWebview.getSettings().setDomStorageEnabled(true);
         b.trailerWebview.getSettings().setMediaPlaybackRequiresUserGesture(false);
+        CookieManager cookies = CookieManager.getInstance();
+        cookies.setAcceptCookie(true);
+        cookies.setAcceptThirdPartyCookies(b.trailerWebview, true);
+        b.trailerWebview.addJavascriptInterface(
+                new TrailerJavascriptBridge(), "TorrentPlayer");
     }
 
     private void startInlineTrailer() {
@@ -334,16 +353,49 @@ public class DetailActivity extends AppCompatActivity {
         b.trailerWebview.setVisibility(View.VISIBLE);
         b.backdropScrim.setAlpha(0.35f);
 
-        String embedUrl = "https://www.youtube.com/embed/" + video.key
-                + "?autoplay=1&mute=1&controls=1&playsinline=1&rel=0";
         String html = "<!doctype html><html><head>"
                 + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+                + "<meta name=\"referrer\" content=\"strict-origin-when-cross-origin\">"
                 + "<style>html,body,iframe{margin:0;width:100%;height:100%;border:0;"
                 + "background:#000;overflow:hidden}</style></head><body>"
-                + "<iframe src=\"" + embedUrl + "\" allow=\"autoplay; encrypted-media; "
-                + "picture-in-picture\" allowfullscreen></iframe></body></html>";
+                + "<div id=\"player\"></div>"
+                + "<script src=\"https://www.youtube.com/iframe_api\"></script>"
+                + "<script>function onYouTubeIframeAPIReady(){new YT.Player('player',{"
+                + "videoId:'" + video.key + "',width:'100%',height:'100%',"
+                + "host:'" + YOUTUBE_EMBED_ORIGIN + "',"
+                + "playerVars:{autoplay:1,mute:1,controls:1,playsinline:1,rel:0,"
+                + "origin:'" + YOUTUBE_EMBED_ORIGIN + "'},"
+                + "events:{onReady:function(e){e.target.mute();e.target.playVideo();},"
+                + "onError:function(e){TorrentPlayer.onPlayerError(String(e.data));}}"
+                + "});}</script></body></html>";
         b.trailerWebview.loadDataWithBaseURL(
-                "https://www.youtube.com/", html, "text/html", "UTF-8", null);
+                TRAILER_PAGE_ORIGIN + "/trailer.html",
+                html, "text/html", "UTF-8", null);
+    }
+
+    private final class TrailerJavascriptBridge {
+        @JavascriptInterface
+        public void onPlayerError(String code) {
+            runOnUiThread(() -> {
+                android.util.Log.w("DetailActivity",
+                        "YouTube embedded player error: " + code);
+                trailerEmbedFailed = true;
+                stopInlineTrailer();
+                renderBackdrop();
+                Toast.makeText(DetailActivity.this,
+                        R.string.detail_video_embed_error, Toast.LENGTH_LONG).show();
+            });
+        }
+    }
+
+    private void openFeaturedVideo() {
+        TMDBVideo video = featuredVideo;
+        if (video == null || !video.isYouTube()) return;
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(video.watchUrl())));
+        } catch (RuntimeException error) {
+            Toast.makeText(this, R.string.detail_video_open_error, Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void stopInlineTrailer() {
