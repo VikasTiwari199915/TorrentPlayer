@@ -20,7 +20,7 @@ android {
     }
 
     val releaseVersionName: String =
-        (project.findProperty("versionName") as String?) ?: "1.3.6"
+        (project.findProperty("versionName") as String?) ?: "1.3.7"
 
     defaultConfig {
         applicationId = "com.vikas.torrentplayer.tv"
