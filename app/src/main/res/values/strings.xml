@@ -155,5 +155,6 @@
     <string name="image_poster">Poster</string>
     <string name="image_backdrop">Backdrop</string>
     <string name="detail_play_trailer">Play trailer</string>
-    <string name="detail_video_open_error">No app can open this video.</string>
+    <string name="pref_trailer_autoplay_title">Autoplay trailers</string>
+    <string name="pref_trailer_autoplay_summary">Play available trailers in the detail header after a short delay. Trailers start muted.</string>
 </resources>

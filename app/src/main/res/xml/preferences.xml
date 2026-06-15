@@ -50,6 +50,12 @@
             app:useSimpleSummaryProvider="true" />
 
         <SwitchPreferenceCompat
+            android:key="pref_trailer_autoplay"
+            android:title="@string/pref_trailer_autoplay_title"
+            android:summary="@string/pref_trailer_autoplay_summary"
+            android:defaultValue="true" />
+
+        <SwitchPreferenceCompat
             android:key="pref_verified_only"
             android:title="@string/pref_verified_only_title"
             android:summary="@string/pref_verified_only_summary"

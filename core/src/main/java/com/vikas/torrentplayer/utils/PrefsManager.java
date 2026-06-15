@@ -24,6 +24,7 @@ public final class PrefsManager {
     public static final String KEY_TV_BACKDROP = "pref_tv_backdrop";
     public static final String KEY_TORBOX_KEY = "pref_torbox_key";
     public static final String KEY_TMDB_CREDENTIAL = "pref_tmdb_credential";
+    public static final String KEY_TRAILER_AUTOPLAY = "pref_trailer_autoplay";
 
     private final SharedPreferences sp;
 
@@ -116,5 +117,10 @@ public final class PrefsManager {
     public boolean hasTmdbCredential() {
         String c = getTmdbCredential();
         return c != null && !c.isEmpty();
+    }
+
+    /** Autoplay the featured TMDB trailer in the phone detail header. */
+    public boolean isTrailerAutoplayEnabled() {
+        return sp.getBoolean(KEY_TRAILER_AUTOPLAY, true);
     }
 }

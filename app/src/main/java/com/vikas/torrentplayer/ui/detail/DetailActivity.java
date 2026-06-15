@@ -1,11 +1,15 @@
 package com.vikas.torrentplayer.ui.detail;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
-import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.TextUtils;
 import android.view.View;
+import android.webkit.WebChromeClient;
+import android.webkit.WebView;
 import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
@@ -81,6 +85,9 @@ public class DetailActivity extends AppCompatActivity {
     @Nullable private Integer selectedEpisode;
     @Nullable private SearchResult currentResult;
     @Nullable private TMDBVideo featuredVideo;
+    private final Handler trailerHandler = new Handler(Looper.getMainLooper());
+    private final Runnable autoplayTrailer = this::startInlineTrailer;
+    private boolean trailerPlaying;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -96,6 +103,7 @@ public class DetailActivity extends AppCompatActivity {
             getSupportActionBar().setDisplayShowTitleEnabled(false);
         }
         b.toolbar.setNavigationOnClickListener(v -> finish());
+        configureTrailerPlayer();
 
         SearchResult result = (SearchResult) getIntent().getSerializableExtra(EXTRA_RESULT);
         if (result == null) {
@@ -152,8 +160,14 @@ public class DetailActivity extends AppCompatActivity {
             b.episodeSection.setVisibility(r.isShow() ? View.VISIBLE : View.GONE);
         });
         vm.featuredVideo().observe(this, video -> {
+            trailerHandler.removeCallbacks(autoplayTrailer);
+            stopInlineTrailer();
             featuredVideo = video;
             renderBackdrop();
+            if (video != null && video.isYouTube()
+                    && new PrefsManager(this).isTrailerAutoplayEnabled()) {
+                trailerHandler.postDelayed(autoplayTrailer, 2500L);
+            }
         });
         vm.seriesDetails().observe(this, this::renderSeriesDetails);
         vm.seasons().observe(this, list -> {
@@ -179,7 +193,7 @@ public class DetailActivity extends AppCompatActivity {
                         ? View.VISIBLE : View.GONE));
         b.btnSeason.setOnClickListener(v -> showSeasonPicker());
         b.btnEpisode.setOnClickListener(v -> showEpisodePicker());
-        b.playTrailer.setOnClickListener(v -> openFeaturedVideo());
+        b.playTrailer.setOnClickListener(v -> startInlineTrailer());
         vm.load(result);
 
         // The AppBarLayout already declares fitsSystemWindows="true", so insets
@@ -285,6 +299,7 @@ public class DetailActivity extends AppCompatActivity {
 
     private void renderBackdrop() {
         if (b == null) return;
+        if (trailerPlaying) return;
         String backdropUrl = currentResult == null ? null : currentResult.backdropUrl;
         if (featuredVideo != null && featuredVideo.isYouTube()) {
             Glide.with(this)
@@ -302,14 +317,42 @@ public class DetailActivity extends AppCompatActivity {
         }
     }
 
-    private void openFeaturedVideo() {
+    @SuppressLint("SetJavaScriptEnabled")
+    private void configureTrailerPlayer() {
+        b.trailerWebview.setWebChromeClient(new WebChromeClient());
+        b.trailerWebview.getSettings().setJavaScriptEnabled(true);
+        b.trailerWebview.getSettings().setDomStorageEnabled(true);
+        b.trailerWebview.getSettings().setMediaPlaybackRequiresUserGesture(false);
+    }
+
+    private void startInlineTrailer() {
         TMDBVideo video = featuredVideo;
-        if (video == null || !video.isYouTube()) return;
-        try {
-            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(video.watchUrl())));
-        } catch (RuntimeException error) {
-            Toast.makeText(this, R.string.detail_video_open_error, Toast.LENGTH_SHORT).show();
-        }
+        if (b == null || video == null || !video.isYouTube() || trailerPlaying) return;
+        trailerHandler.removeCallbacks(autoplayTrailer);
+        trailerPlaying = true;
+        b.playTrailer.setVisibility(View.GONE);
+        b.trailerWebview.setVisibility(View.VISIBLE);
+        b.backdropScrim.setAlpha(0.35f);
+
+        String embedUrl = "https://www.youtube.com/embed/" + video.key
+                + "?autoplay=1&mute=1&controls=1&playsinline=1&rel=0";
+        String html = "<!doctype html><html><head>"
+                + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+                + "<style>html,body,iframe{margin:0;width:100%;height:100%;border:0;"
+                + "background:#000;overflow:hidden}</style></head><body>"
+                + "<iframe src=\"" + embedUrl + "\" allow=\"autoplay; encrypted-media; "
+                + "picture-in-picture\" allowfullscreen></iframe></body></html>";
+        b.trailerWebview.loadDataWithBaseURL(
+                "https://www.youtube.com/", html, "text/html", "UTF-8", null);
+    }
+
+    private void stopInlineTrailer() {
+        trailerPlaying = false;
+        if (b == null) return;
+        b.trailerWebview.stopLoading();
+        b.trailerWebview.loadUrl("about:blank");
+        b.trailerWebview.setVisibility(View.GONE);
+        b.backdropScrim.setAlpha(1f);
     }
 
     private void renderSeriesDetails(@Nullable TMDBSeriesDetails details) {
@@ -414,7 +457,35 @@ public class DetailActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onPause() {
+        trailerHandler.removeCallbacks(autoplayTrailer);
+        if (b != null) b.trailerWebview.onPause();
+        super.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (b != null) {
+            b.trailerWebview.onResume();
+            if (!trailerPlaying && featuredVideo != null && featuredVideo.isYouTube()
+                    && new PrefsManager(this).isTrailerAutoplayEnabled()) {
+                trailerHandler.removeCallbacks(autoplayTrailer);
+                trailerHandler.postDelayed(autoplayTrailer, 2500L);
+            }
+        }
+    }
+
+    @Override
     protected void onDestroy() {
+        trailerHandler.removeCallbacksAndMessages(null);
+        WebView trailer = b == null ? null : b.trailerWebview;
+        if (trailer != null) {
+            trailer.stopLoading();
+            trailer.loadUrl("about:blank");
+            trailer.removeAllViews();
+            trailer.destroy();
+        }
         super.onDestroy();
         b = null;
     }
