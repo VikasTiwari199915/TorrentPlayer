@@ -22,10 +22,9 @@ import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
 import androidx.activity.OnBackPressedCallback;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.graphics.Insets;
-import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.lifecycle.ViewModelProvider;
@@ -54,15 +53,14 @@ import com.vikas.torrentplayer.ui.torbox.TorBoxFileChooser;
 import com.vikas.torrentplayer.utils.MagnetUtils;
 import com.vikas.torrentplayer.utils.PrefsManager;
 
+import java.text.MessageFormat;
 import java.util.List;
 
 public class DetailActivity extends AppCompatActivity {
 
     private static final String EXTRA_RESULT = "extra_result";
-    private static final String TRAILER_PAGE_ORIGIN =
-            "https://com.vikas.torrentplayer";
-    private static final String YOUTUBE_EMBED_ORIGIN =
-            "https://www.youtube-nocookie.com";
+    private static final String TRAILER_PAGE_ORIGIN = "https://com.vikas.torrentplayer";
+    private static final String YOUTUBE_EMBED_ORIGIN = "https://www.youtube-nocookie.com";
 
     public static void start(Context ctx, SearchResult item) {
         Intent i = new Intent(ctx, DetailActivity.class);
@@ -108,7 +106,6 @@ public class DetailActivity extends AppCompatActivity {
     private boolean trailerEmbedFailed;
     private boolean pendingTrailerStart;
     private boolean userSeeking;
-    private boolean trailerMuted = true;
     private double trailerDuration;
     @Nullable private WebView trailerWebView;
     @Nullable private ViewGroup trailerSurface;
@@ -355,9 +352,9 @@ public class DetailActivity extends AppCompatActivity {
             }
 
             @Override
-            public void onTrailerViewsReady(WebView webView, ViewGroup surface,
-                                            MaterialButton mute, SeekBar progress,
-                                            MaterialButton fullscreen) {
+            public void onTrailerViewsReady(@NonNull WebView webView, @NonNull ViewGroup surface,
+                                            @NonNull MaterialButton mute, @NonNull SeekBar progress,
+                                            @NonNull MaterialButton fullscreen) {
                 configureTrailerPlayer(webView, surface, mute, progress, fullscreen);
             }
         });
@@ -461,30 +458,26 @@ public class DetailActivity extends AppCompatActivity {
                 + "function onYouTubeIframeAPIReady(){player=new YT.Player('player',{"
                 + "videoId:'" + video.key + "',width:'100%',height:'100%',"
                 + "host:'" + YOUTUBE_EMBED_ORIGIN + "',"
-                + "playerVars:{autoplay:1,mute:1,controls:0,disablekb:1,fs:0,playsinline:1,rel:0,"
+                + "playerVars:{autoplay:1,mute:0,controls:0,disablekb:1,fs:0,playsinline:1,rel:0,"
                 + "origin:'" + YOUTUBE_EMBED_ORIGIN + "'},"
-                + "events:{onReady:function(e){e.target.mute();e.target.playVideo();"
+                + "events:{onReady:function(e){e.target.playVideo();"
                 + "TorrentPlayer.onReady(e.target.getDuration(),e.target.isMuted());"
                 + "setInterval(report,500);},"
                 + "onStateChange:function(e){if(e.data===0){TorrentPlayer.onEnded();}},"
                 + "onError:function(e){TorrentPlayer.onPlayerError(String(e.data));}}"
                 + "});}</script></body></html>";
-        webView.loadDataWithBaseURL(
-                TRAILER_PAGE_ORIGIN + "/trailer.html",
-                html, "text/html", "UTF-8", null);
+        webView.loadDataWithBaseURL(TRAILER_PAGE_ORIGIN + "/trailer.html", html, "text/html", "UTF-8", null);
     }
 
     private final class TrailerJavascriptBridge {
         @JavascriptInterface
         public void onPlayerError(String code) {
             runOnUiThread(() -> {
-                android.util.Log.w("DetailActivity",
-                        "YouTube embedded player error: " + code);
+                android.util.Log.w("DetailActivity", "YouTube embedded player error: " + code);
                 trailerEmbedFailed = true;
                 stopInlineTrailer();
                 renderBackdrop();
-                Toast.makeText(DetailActivity.this,
-                        R.string.detail_video_embed_error, Toast.LENGTH_LONG).show();
+                Toast.makeText(DetailActivity.this, R.string.detail_video_embed_error, Toast.LENGTH_LONG).show();
             });
         }
 
@@ -546,15 +539,10 @@ public class DetailActivity extends AppCompatActivity {
 
     private void updateTrailerProgress(double current, double duration, boolean muted) {
         trailerDuration = Math.max(0, duration);
-        trailerMuted = muted;
         MaterialButton mute = trailerMute;
         if (mute != null) {
-            mute.setIconResource(muted
-                    ? R.drawable.rounded_volume_off_24
-                    : R.drawable.rounded_volume_up_24);
-            mute.setContentDescription(getString(muted
-                    ? R.string.detail_trailer_unmute
-                    : R.string.detail_trailer_mute));
+            mute.setIconResource(muted ? R.drawable.rounded_volume_off_24 : R.drawable.rounded_volume_up_24);
+            mute.setContentDescription(getString(muted ? R.string.detail_trailer_unmute : R.string.detail_trailer_mute));
         }
         SeekBar progress = trailerProgress;
         if (progress != null && !userSeeking && trailerDuration > 0) {
@@ -620,8 +608,7 @@ public class DetailActivity extends AppCompatActivity {
     private void renderSeriesDetails(@Nullable TMDBSeriesDetails details) {
         if (details == null) return;
         b.episodeSection.setVisibility(View.VISIBLE);
-        b.episodeSummary.setText(details.numberOfSeasons + " seasons · "
-                + details.numberOfEpisodes + " episodes");
+        b.episodeSummary.setText(MessageFormat.format("{0} seasons · {1} episodes", details.numberOfSeasons, details.numberOfEpisodes));
         b.episodeMessage.setText(R.string.detail_episodes_source);
         b.episodeMessage.setVisibility(View.VISIBLE);
     }
@@ -691,7 +678,7 @@ public class DetailActivity extends AppCompatActivity {
                 return;
             }
         }
-        b.btnSeason.setText("Season " + selectedSeason);
+        b.btnSeason.setText(MessageFormat.format("Season {0}", selectedSeason));
     }
 
     private void updateEpisodeButton() {
@@ -705,7 +692,7 @@ public class DetailActivity extends AppCompatActivity {
                 return;
             }
         }
-        b.btnEpisode.setText("Episode " + selectedEpisode);
+        b.btnEpisode.setText(MessageFormat.format("Episode {0}", selectedEpisode));
     }
 
     private void renderState(DetailViewModel.UiState state) {

@@ -29,7 +29,7 @@ android {
     // CI passes -PversionName=<tag-minus-v> so the APK actually reports the
     // release version. Local builds fall back to the literal string below.
     val releaseVersionName: String =
-        (project.findProperty("versionName") as String?) ?: "1.3.9"
+        (project.findProperty("versionName") as String?) ?: "1.4.0"
 
     defaultConfig {
         applicationId = "com.vikas.torrentplayer"
