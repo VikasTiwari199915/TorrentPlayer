@@ -24,6 +24,14 @@
         tools:layout="@layout/fragment_downloads" />
 
     <fragment
+        android:id="@+id/favoritesFragment"
+        android:name="com.vikas.torrentplayer.ui.favorites.FavoritesFragment"
+        android:label="Favorites" />
+    <fragment
+        android:id="@+id/torBoxFragment"
+        android:name="com.vikas.torrentplayer.ui.torbox.TorBoxLibraryFragment"
+        android:label="TorBox" />
+    <fragment
         android:id="@+id/settingsFragment"
         android:name="com.vikas.torrentplayer.ui.settings.SettingsFragment"
         android:label="@string/nav_settings" />

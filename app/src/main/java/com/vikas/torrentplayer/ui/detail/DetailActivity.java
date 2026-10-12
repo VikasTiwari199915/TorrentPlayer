@@ -92,6 +92,8 @@ public class DetailActivity extends AppCompatActivity {
 
     private ActivityDetailBinding b;
     private DetailViewModel vm;
+    private android.view.MenuItem favoriteAction;
+    private java.util.List<com.vikas.torrentplayer.db.FavoriteEntity> favoriteRows = java.util.Collections.emptyList();
     private TorrentAdapter adapter;
     private DetailMediaPagerAdapter mediaAdapter;
     private List<TMDBSeasonSummary> seasonChoices = new java.util.ArrayList<>();
@@ -148,6 +150,17 @@ public class DetailActivity extends AppCompatActivity {
         }
 
         currentResult = result;
+        favoriteAction = b.toolbar.getMenu().add("Add to favorites");
+        favoriteAction.setIcon(R.drawable.rounded_star_24);
+        favoriteAction.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS);
+        com.vikas.torrentplayer.db.AppDatabase.get(this).favoriteDao().observeAll().observe(this, favorites -> {
+            favoriteRows = favorites;
+            updateFavoriteAction();
+        });
+        favoriteAction.setOnMenuItemClickListener(menu -> {
+            com.vikas.torrentplayer.db.Favorites.set(this, currentResult, !menu.isChecked());
+            return true;
+        });
         bindHeader(result);
         b.episodeSection.setVisibility(result.isShow() ? View.VISIBLE : View.GONE);
         b.btnSeason.setEnabled(false);
@@ -177,7 +190,10 @@ public class DetailActivity extends AppCompatActivity {
             }
             @Override
             public void onDownloadLong(TorrentItem item) {
-                startTorBox(item);
+                startTorBox(item, false);
+            }
+            @Override public void onTorBoxDownload(TorrentItem item) {
+                startTorBox(item, true);
             }
         });
         b.torrentsRecycler.setLayoutManager(new LinearLayoutManager(this));
@@ -238,7 +254,7 @@ public class DetailActivity extends AppCompatActivity {
     }
 
     /** Long-press Download → get this torrent via TorBox (stream or download). */
-    private void startTorBox(TorrentItem item) {
+    private void startTorBox(TorrentItem item, boolean downloadAll) {
         if (!new PrefsManager(this).hasTorBoxKey()) {
             Toast.makeText(this, "Add your TorBox API key in Settings first",
                     Toast.LENGTH_LONG).show();
@@ -269,7 +285,8 @@ public class DetailActivity extends AppCompatActivity {
             @Override public void onReady(TorBoxClient.TbTorrent torrent) {
                 if (isFinishing()) return;
                 dlg.dismiss();
-                TorBoxFileChooser.show(DetailActivity.this, torrent, title);
+                if (downloadAll) TorBoxFileChooser.downloadAll(DetailActivity.this, torrent, title);
+                else TorBoxFileChooser.showVideos(DetailActivity.this, torrent);
             }
             @Override public void onError(String message) {
                 if (isFinishing()) return;
@@ -301,7 +318,17 @@ public class DetailActivity extends AppCompatActivity {
         }
     }
 
+    private void updateFavoriteAction() {
+        if (favoriteAction == null || currentResult == null) return;
+        boolean saved = favoriteRows.stream().anyMatch(f -> com.vikas.torrentplayer.db.Favorites.matches(f, currentResult));
+        favoriteAction.setTitle(saved ? "Remove from favorites" : "Add to favorites");
+        favoriteAction.setChecked(saved);
+        favoriteAction.getIcon().setTint(com.google.android.material.color.MaterialColors.getColor(
+                b.toolbar, saved ? androidx.appcompat.R.attr.colorPrimary : com.google.android.material.R.attr.colorOnSurface));
+    }
+
     private void bindHeader(SearchResult r) {
+        updateFavoriteAction();
         b.collapsingToolbar.setTitle(r.title);
         b.title.setText(r.title != null ? r.title : "—");
 

@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # Decode the signing keystore from secrets and drop it at the repo root.
-      # Both :app and :tv read it via rootProject.file("keystore.jks").
+      # The mobile app reads it via rootProject.file("keystore.jks").
       - name: Set up Keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > $GITHUB_WORKSPACE/keystore.jks
@@ -47,9 +47,9 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Building versionName=${VERSION}"
 
-      - name: Build Signed APKs (Phone + TV)
+      - name: Build Signed Mobile APK
         run: |
-          ./gradlew :app:assembleRelease :tv:assembleRelease \
+          ./gradlew :app:assembleRelease \
             -PversionName=${{ steps.version.outputs.version }} \
             --build-cache \
             --stacktrace
@@ -67,14 +67,11 @@ jobs:
           mkdir -p release-artifacts
           cp app/build/outputs/apk/release/app-release.apk \
              "release-artifacts/torrentplayer-app-${VERSION}.apk"
-          cp tv/build/outputs/apk/release/tv-release.apk \
-             "release-artifacts/torrentplayer-tv-${VERSION}.apk"
           ls -la release-artifacts/
 
       - name: Verify APKs exist
         run: |
           test -s app/build/outputs/apk/release/app-release.apk || { echo "phone APK missing"; exit 1; }
-          test -s tv/build/outputs/apk/release/tv-release.apk   || { echo "tv APK missing";    exit 1; }
 
       - name: Upload Signed APKs to Release
         uses: softprops/action-gh-release@v2
@@ -83,6 +80,5 @@ jobs:
           tag_name: ${{ github.ref_name }}
           files: |
             release-artifacts/torrentplayer-app-${{ steps.version.outputs.version }}.apk
-            release-artifacts/torrentplayer-tv-${{ steps.version.outputs.version }}.apk
           generate_release_notes: true
           draft: false

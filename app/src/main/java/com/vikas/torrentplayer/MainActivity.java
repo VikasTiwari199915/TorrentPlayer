@@ -46,6 +46,8 @@ public class MainActivity extends AppCompatActivity {
 
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
+        com.vikas.torrentplayer.torrent.TorrentManager.get().init(getApplicationContext());
+        com.vikas.torrentplayer.ui.favorites.EpisodeCheckWorker.schedule(this);
 
         // Ask for notification permission so the foreground service notification
         // (which shows download progress) is actually visible. Android 13+ only.
@@ -62,6 +64,34 @@ public class MainActivity extends AppCompatActivity {
         if (host != null) {
             NavController nav = host.getNavController();
             NavigationUI.setupWithNavController(binding.bottomNav, nav);
+            host.getChildFragmentManager().registerFragmentLifecycleCallbacks(
+                    new androidx.fragment.app.FragmentManager.FragmentLifecycleCallbacks() {
+                        @Override public void onFragmentViewCreated(
+                                androidx.fragment.app.FragmentManager fm, androidx.fragment.app.Fragment fragment,
+                                android.view.View view, Bundle state) {
+                            if (nav.getCurrentDestination() != null
+                                    && nav.getCurrentDestination().getId() == R.id.settingsFragment) return;
+                            androidx.appcompat.widget.Toolbar toolbar = findToolbar(view);
+                            if (toolbar != null) {
+                                android.view.MenuItem settings = toolbar.getMenu().add(R.string.nav_settings);
+                                settings.setIcon(R.drawable.rounded_settings_24);
+                                settings.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS);
+                                settings.getIcon().setTint(com.google.android.material.color.MaterialColors.getColor(
+                                        toolbar, com.google.android.material.R.attr.colorOnSurface));
+                                settings.setOnMenuItemClickListener(item -> { nav.navigate(R.id.settingsFragment); return true; });
+                            }
+                        }
+                    }, false);
+            // The initial destination may have been inflated before registration.
+            androidx.appcompat.widget.Toolbar firstToolbar = findToolbar(host.requireView());
+            if (firstToolbar != null) {
+                android.view.MenuItem settings = firstToolbar.getMenu().add(R.string.nav_settings);
+                settings.setIcon(R.drawable.rounded_settings_24);
+                settings.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS);
+                settings.getIcon().setTint(com.google.android.material.color.MaterialColors.getColor(
+                        firstToolbar, com.google.android.material.R.attr.colorOnSurface));
+                settings.setOnMenuItemClickListener(item -> { nav.navigate(R.id.settingsFragment); return true; });
+            }
         }
 
         // Apply system bar insets to the bottom nav so it isn't behind gesture bar
@@ -72,6 +102,18 @@ public class MainActivity extends AppCompatActivity {
         });
 
         checkForUpdate();
+    }
+
+    private static androidx.appcompat.widget.Toolbar findToolbar(android.view.View view) {
+        if (view instanceof androidx.appcompat.widget.Toolbar) return (androidx.appcompat.widget.Toolbar) view;
+        if (view instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group = (android.view.ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                androidx.appcompat.widget.Toolbar toolbar = findToolbar(group.getChildAt(i));
+                if (toolbar != null) return toolbar;
+            }
+        }
+        return null;
     }
 
     /** Fire-and-forget GitHub update check, then prompt the user if needed. */

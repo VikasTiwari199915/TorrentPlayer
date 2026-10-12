@@ -119,28 +119,51 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_play"
-                style="@style/Widget.Material3.Button"
+                style="@style/Widget.Material3.Button.IconButton.Filled"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="48dp"
                 android:layout_weight="1"
                 app:icon="@drawable/rounded_play_arrow_24"
-                android:text="@string/action_play" />
+                android:contentDescription="@string/action_play"
+                android:tooltipText="@string/action_play" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_torbox_play"
+                style="@style/Widget.Material3.Button.IconButton.Outlined"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                app:icon="@drawable/ic_cloud_play"
+                android:contentDescription="Play with TorBox"
+                android:tooltipText="Play with TorBox" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_torbox_download"
+                style="@style/Widget.Material3.Button.IconButton.Outlined"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                app:icon="@drawable/ic_cloud_download"
+                android:contentDescription="Download full torrent with TorBox"
+                android:tooltipText="Download full torrent with TorBox" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_download"
-                style="@style/Widget.Material3.Button.OutlinedButton"
+                style="@style/Widget.Material3.Button.IconButton.Outlined"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="48dp"
                 android:layout_weight="1"
                 android:layout_marginStart="6dp"
                 app:icon="@drawable/rounded_download_24"
-                android:text="@string/action_download" />
+                android:contentDescription="@string/action_download"
+                android:tooltipText="@string/action_download" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_magnet"
                 style="@style/Widget.Material3.Button.IconButton.Outlined"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="48dp"
                 android:layout_marginStart="6dp"
                 android:contentDescription="@string/action_magnet"
                 app:icon="@drawable/rounded_link_2_24" />

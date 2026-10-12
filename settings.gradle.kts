@@ -26,4 +26,3 @@ dependencyResolutionManagement {
 rootProject.name = "Torrent Player"
 include(":core")
 include(":app")
-include(":tv")

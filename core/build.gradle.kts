@@ -11,8 +11,7 @@ android {
     }
 
     defaultConfig {
-        // Lowest common denominator: Android TV is API 30 (Android 11).
-        minSdk = 30
+        minSdk = 31
 
         ndk {
             //noinspection ChromeOsAbiSupport

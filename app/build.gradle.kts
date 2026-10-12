@@ -105,6 +105,7 @@ android {
 }
 
 dependencies {
+    implementation("androidx.work:work-runtime:2.11.0")
     // Engine — API client, libtorrent, Room, service, ExoPlayer DataSource.
     implementation(project(":core"))
 

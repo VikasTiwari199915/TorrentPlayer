@@ -23,7 +23,6 @@ public class TorrentPlayerApp extends Application {
         // asynchronously and the user can fire a click handler that calls
         // startStream() before the service finishes coming up. Doing init
         // here makes the engine ready by the time any Activity is shown.
-        TorrentManager.get().init(this);
 
         TorrentDownloadService.configure(new TorrentDownloadService.Config(
                 MainActivity.class,
@@ -31,7 +30,6 @@ public class TorrentPlayerApp extends Application {
                 getString(R.string.app_name),
                 getString(R.string.notif_idle_text)
         ));
-        TorrentDownloadService.start(this);
 
         // Auto-updater: configure the GitHub repo to poll. `assetNameContains`
         // narrows asset matching for repos that ship both phone & TV APKs in

@@ -52,6 +52,8 @@ public final class TorBoxManager {
     private Context appContext;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final ExecutorService transfers = Executors.newSingleThreadExecutor();
+    private final ExecutorService api = Executors.newFixedThreadPool(2);
     private final OkHttpClient fileHttp = new OkHttpClient();
 
     private final Map<String, Download> items = new LinkedHashMap<>();
@@ -89,24 +91,23 @@ public final class TorBoxManager {
             State saved = e.lastState >= 0 && e.lastState < State.values().length
                     ? State.values()[e.lastState] : State.ERROR;
             boolean fileOk = d.file != null && d.file.exists() && d.file.length() > 0;
-            if (saved == State.DONE && fileOk) {
-                d.state = State.DONE;
+            if (saved == State.DONE) {
+                d.state = fileOk && (d.size <= 0 || d.file.length() == d.size) ? State.DONE : State.ERROR;
+                if (d.state == State.ERROR) d.error = "File missing";
             } else if (saved == State.PAUSED) {
                 // Stay paused; the user resumes manually.
                 d.state = State.PAUSED;
                 d.pauseRequested.set(true);
-            } else if (fileOk || saved == State.DOWNLOADING) {
-                // Interrupted mid-download — resume in the background.
-                d.state = State.DOWNLOADING;
-                toResume.add(() -> runFileDownload(d));
+            } else if (saved == State.DOWNLOADING) {
+                d.state = State.PAUSED;
+                d.pauseRequested.set(true);
             } else {
                 d.state = State.ERROR;
                 d.error = "File missing";
             }
-            items.put(d.key, d);
+            main.post(() -> items.putIfAbsent(d.key, d));
         }
         main.post(this::publish);
-        for (Runnable r : toResume) io.execute(r);
     }
 
     private com.vikas.torrentplayer.db.TorBoxDao dao() {
@@ -190,7 +191,7 @@ public final class TorBoxManager {
      * then deliver the torrent with its file list. Reports preparation progress.
      */
     public void addAndPrepare(@NonNull String magnet, @NonNull PrepareCallback cb) {
-        io.execute(() -> {
+        api.execute(() -> {
             try {
                 TorBoxClient c = client();
                 TorBoxClient.AddResult added = c.addMagnet(magnet);
@@ -219,7 +220,7 @@ public final class TorBoxManager {
 
     /** Resolve a direct, streamable HTTPS URL for a file. */
     public void resolveStreamUrl(long torrentId, int fileId, @NonNull Callback<String> cb) {
-        io.execute(() -> {
+        api.execute(() -> {
             try {
                 String url = client().requestDownloadUrl(torrentId, fileId);
                 main.post(() -> cb.onResult(url));
@@ -231,7 +232,7 @@ public final class TorBoxManager {
 
     /** List every torrent currently in the user's TorBox account. */
     public void listAccount(@NonNull Callback<List<TorBoxClient.TbTorrent>> cb) {
-        io.execute(() -> {
+        api.execute(() -> {
             try {
                 List<TorBoxClient.TbTorrent> list = client().listTorrents();
                 main.post(() -> cb.onResult(list));
@@ -243,7 +244,7 @@ public final class TorBoxManager {
 
     /** Delete a torrent from the user's TorBox account. */
     public void deleteFromAccount(long torrentId, @NonNull Callback<Void> cb) {
-        io.execute(() -> {
+        api.execute(() -> {
             try {
                 client().controlTorrent(torrentId, "delete");
                 main.post(() -> cb.onResult(null));
@@ -268,11 +269,12 @@ public final class TorBoxManager {
         d.fileId = fileId;
         d.fileName = fileName;
         d.size = size;
-        d.file = destinationFor(fileName);   // known up front so partial-play has a path
+        d.file = destinationFor(torrentId, fileId, fileName);
         items.put(key, d);
         publish();
         persist(d);
-        io.execute(() -> runFileDownload(d));
+        com.vikas.torrentplayer.service.TorrentDownloadService.start(appContext);
+        transfers.execute(() -> runFileDownload(d));
         return d;
     }
 
@@ -303,7 +305,8 @@ public final class TorBoxManager {
         d.state = State.DOWNLOADING;
         publish();
         persist(d);
-        io.execute(() -> runFileDownload(d));   // resumes via HTTP Range
+        com.vikas.torrentplayer.service.TorrentDownloadService.start(appContext);
+        transfers.execute(() -> runFileDownload(d));   // resumes via HTTP Range
     }
 
     @MainThread
@@ -319,9 +322,10 @@ public final class TorBoxManager {
     // ------------------------------------------------------------------
 
     private void runFileDownload(Download d) {
+        if (d.shouldStop()) return;
         try {
             String url = client().requestDownloadUrl(d.torrentId, d.fileId);
-            File out = d.file != null ? d.file : destinationFor(d.fileName);
+            File out = d.file != null ? d.file : destinationFor(d.torrentId, d.fileId, d.fileName);
             d.file = out;
             update(d, State.DOWNLOADING, d.percent, 0);
             downloadToFile(d, url, out);
@@ -331,6 +335,7 @@ public final class TorBoxManager {
                 return;
             }
             if (d.pauseRequested.get()) return;   // paused: keep partial file, state already PAUSED
+            if (d.size > 0 && out.length() != d.size) throw new IOException("Incomplete download; retry to resume");
             update(d, State.DONE, 100, 0);
             notifyMediaScanner(out);
             Log.i(TAG, "TorBox download complete: " + out.getAbsolutePath());
@@ -381,10 +386,10 @@ public final class TorBoxManager {
         }
     }
 
-    private File destinationFor(String fileName) {
+    private File destinationFor(long torrentId, int fileId, String fileName) {
         File base = TorrentManager.get().getSaveDir();
         if (base == null) base = appContext.getExternalFilesDir(null);
-        File dir = new File(base, "TorBox");
+        File dir = new File(base, "TorBox/" + torrentId + "/" + fileId);
         String leaf = fileName != null ? fileName : "torbox.mp4";
         int slash = Math.max(leaf.lastIndexOf('/'), leaf.lastIndexOf('\\'));
         if (slash >= 0 && slash < leaf.length() - 1) leaf = leaf.substring(slash + 1);
@@ -429,6 +434,20 @@ public final class TorBoxManager {
 
     @MainThread
     private void publish() {
-        downloads.setValue(new ArrayList<>(items.values()));
+        List<Download> snapshot = new ArrayList<>();
+        for (Download item : items.values()) {
+            Download copy = new Download(item.key, item.title);
+            copy.torrentId = item.torrentId;
+            copy.fileId = item.fileId;
+            copy.fileName = item.fileName;
+            copy.size = item.size;
+            copy.state = item.state;
+            copy.percent = item.percent;
+            copy.speed = item.speed;
+            copy.file = item.file;
+            copy.error = item.error;
+            snapshot.add(copy);
+        }
+        downloads.setValue(snapshot);
     }
 }

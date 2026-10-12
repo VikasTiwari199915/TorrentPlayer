@@ -67,7 +67,8 @@ public class TorBoxDownloadsAdapter
             b.progressText.setText(status);
             b.progress.setProgressCompat(d.percent, false);
 
-            boolean fileReady = d.file != null;
+            boolean fileReady = d.file != null && d.file.isFile() && d.file.length() > 0
+                    && d.state != TorBoxManager.State.ERROR;
             b.btnPlay.setVisibility(fileReady ? View.VISIBLE : View.INVISIBLE);
             b.btnPlay.setOnClickListener(v -> { if (listener != null) listener.onPlay(d); });
 
@@ -83,7 +84,7 @@ public class TorBoxDownloadsAdapter
             b.btnPause.setOnClickListener(v -> { if (listener != null) listener.onPauseToggle(d); });
 
             b.btnRemove.setOnClickListener(v -> { if (listener != null) listener.onRemove(d); });
-            b.getRoot().setOnClickListener(v -> { if (listener != null) listener.onPlay(d); });
+            b.getRoot().setOnClickListener(v -> { if (fileReady && listener != null) listener.onPlay(d); });
         }
     }
 
@@ -96,7 +97,8 @@ public class TorBoxDownloadsAdapter
                 @Override public boolean areContentsTheSame(
                         @NonNull TorBoxManager.Download a, @NonNull TorBoxManager.Download b) {
                     return a.state == b.state && a.percent == b.percent
-                            && a.speed == b.speed && (a.file != null) == (b.file != null);
+                            && a.speed == b.speed && java.util.Objects.equals(a.file, b.file)
+                            && java.util.Objects.equals(a.error, b.error);
                 }
             };
 }

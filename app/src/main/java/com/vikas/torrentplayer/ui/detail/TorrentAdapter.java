@@ -31,6 +31,7 @@ public class TorrentAdapter extends ListAdapter<TorrentItem, TorrentAdapter.VH> 
         void onMagnetLong(TorrentItem item);
         /** Long-press on the download button — "Via TorBox" (stream/download). */
         void onDownloadLong(TorrentItem item);
+        void onTorBoxDownload(TorrentItem item);
     }
 
     private final OnTorrentAction listener;
@@ -71,13 +72,15 @@ public class TorrentAdapter extends ListAdapter<TorrentItem, TorrentAdapter.VH> 
                     listener.onDownload(getItem(p));
                 }
             });
-            b.btnDownload.setOnLongClickListener(v -> {
+            b.btnTorboxPlay.setOnClickListener(v -> {
                 int p = getBindingAdapterPosition();
                 if (p != RecyclerView.NO_POSITION && listener != null) {
                     listener.onDownloadLong(getItem(p));
-                    return true;
                 }
-                return false;
+            });
+            b.btnTorboxDownload.setOnClickListener(v -> {
+                int p = getBindingAdapterPosition();
+                if (p != RecyclerView.NO_POSITION && listener != null) listener.onTorBoxDownload(getItem(p));
             });
             b.btnMagnet.setOnClickListener(v -> {
                 int p = getBindingAdapterPosition();

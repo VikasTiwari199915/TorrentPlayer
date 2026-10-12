@@ -159,6 +159,7 @@ public class TorrentManager {
         int headBufferLastPiece = -1;
         int tailBufferFirstPiece = -1;
         boolean readyEmitted = false;
+        File directory;
         /** External subtitle files in the torrent (paths under saveDir). */
         final List<File> subtitleFiles = new ArrayList<>();
     }
@@ -686,7 +687,8 @@ public class TorrentManager {
     public void resume(String infoHash) {
         DownloadHandle h = handles.get(infoHash);
         TorrentRecord rec = records.get(infoHash);
-        if (h == null || rec == null || rec.hash == null) return;
+        if (h == null) return;
+        if (rec == null || rec.hash == null) { restartDownload(infoHash); return; }
         if (h.state.getValue() == DownloadHandle.State.PAUSED) {
             h.state.setValue(DownloadHandle.State.BUFFERING);
             persistAsync(h);
@@ -1033,7 +1035,24 @@ public class TorrentManager {
         String key = infoHash.toLowerCase(Locale.US);
         DownloadHandle h = handles.get(key);
         TorrentRecord rec = records.get(key);
-        if (h == null || rec == null || rec.hash == null || session == null) return;
+        if (h == null || session == null) return;
+
+        h.completedFilesJson = null;
+        if (rec == null || rec.hash == null) {
+            h.errorMessage.setValue(null);
+            h.state.setValue(DownloadHandle.State.STARTING);
+            File cached = new File(torrentFileCacheDir, key + ".torrent");
+            TorrentItem item = new TorrentItem();
+            item.infoHash = key;
+            item.magnetUrl = h.magnetUrl;
+            if (cached.isFile()) addToSession(cached, item, h, false, DownloadHandle.State.BUFFERING);
+            else if (h.magnetUrl != null && !h.magnetUrl.isEmpty()) startWithMagnet(h.magnetUrl, h);
+            else {
+                h.state.setValue(DownloadHandle.State.ERROR);
+                h.errorMessage.setValue("Torrent metadata missing. Add this torrent again to restart.");
+            }
+            return;
+        }
 
         h.errorMessage.setValue(null);
         h.state.setValue(DownloadHandle.State.BUFFERING);
@@ -1093,6 +1112,13 @@ public class TorrentManager {
                 try { th.filePriority(idx, target); }
                 catch (Throwable t) { Log.w(TAG, "filePriority(" + idx + ") failed", t); }
             }
+            List<Integer> selected = new ArrayList<>();
+            for (int i = 0; i < ti.files().numFiles(); i++) {
+                if (th.filePriority(i) != Priority.IGNORE) selected.add(i);
+            }
+            h.selectedFilesJson = new com.google.gson.Gson().toJson(selected);
+            h.completedFilesJson = null;
+            main.post(() -> persistAsync(h));
             if (enable) {
                 requestFilePieces(th, ti, indices);
                 try { th.setFlags(TorrentFlags.AUTO_MANAGED); }
@@ -1138,6 +1164,94 @@ public class TorrentManager {
     // Restore + persist
     // ---------------------------------------------------------------------
 
+    private static class CompletedFile {
+        String path;
+        long size;
+        CompletedFile(String path, long size) { this.path = path; this.size = size; }
+    }
+
+    /** Runs before libtorrent opens files, since opening can recreate deleted payloads. */
+    private boolean completedFilesMissing(DownloadEntity row) {
+        if (row.completedFilesJson != null) {
+            try {
+                CompletedFile[] files = new com.google.gson.Gson().fromJson(row.completedFilesJson, CompletedFile[].class);
+                if (files != null) for (CompletedFile file : files) {
+                    File disk = new File(file.path);
+                    if (!disk.isFile() || disk.length() != file.size) return true;
+                }
+                return false;
+            } catch (RuntimeException exception) { Log.w(TAG, "Invalid completion manifest", exception); }
+        }
+        if (row.lastState != DownloadHandle.State.FINISHED.ordinal()) return false;
+        // Upgrade existing records without moving any payloads.
+        try {
+            File torrent = row.torrentFilePath == null ? new File(torrentFileCacheDir, row.infoHash + ".torrent")
+                    : new File(row.torrentFilePath);
+            if (torrent.isFile()) {
+                TorrentInfo info = new TorrentInfo(readBytes(torrent));
+                FileStorage files = info.files();
+                File directory = row.downloadDirectory == null ? saveDir : new File(row.downloadDirectory);
+                if (row.downloadDirectory == null && row.videoFilePath != null) {
+                    for (int i = 0; i < files.numFiles(); i++) {
+                        String suffix = File.separator + files.filePath(i);
+                        if (row.videoFilePath.endsWith(suffix)) {
+                            directory = new File(row.videoFilePath.substring(0, row.videoFilePath.length() - suffix.length()));
+                            break;
+                        }
+                    }
+                }
+                row.downloadDirectory = directory.getAbsolutePath();
+                List<CompletedFile> completed = new ArrayList<>();
+                Set<Integer> selected = new LinkedHashSet<>();
+                if (row.selectedFilesJson != null) {
+                    int[] indices = new com.google.gson.Gson().fromJson(row.selectedFilesJson, int[].class);
+                    if (indices != null) for (int index : indices) selected.add(index);
+                } else {
+                    selected.addAll(findAllVideoFiles(files));
+                    selected.addAll(findSubtitleFiles(files));
+                }
+                boolean missing = false;
+                for (int i : selected) {
+                    File disk = new File(directory, files.filePath(i));
+                    completed.add(new CompletedFile(disk.getAbsolutePath(), files.fileSize(i)));
+                    missing |= !disk.isFile() || disk.length() != files.fileSize(i);
+                }
+                row.completedFilesJson = new com.google.gson.Gson().toJson(completed);
+                return missing;
+            }
+        } catch (Exception exception) { Log.w(TAG, "Unable to inspect completed files", exception); }
+        return row.videoFilePath != null && !new File(row.videoFilePath).isFile();
+    }
+
+    /** Paused alert is emitted after disk writes stop. Never delete during active I/O. */
+    private void finalizeCompletedFiles(String key) {
+        DownloadHandle h = handles.get(key);
+        TorrentRecord rec = records.get(key);
+        if (h == null || rec == null || h.state.getValue() != DownloadHandle.State.FINISHED) return;
+        io.execute(() -> {
+            if (h.state.getValue() != DownloadHandle.State.FINISHED) return;
+            TorrentHandle th = handleFor(key);
+            if (th == null) return;
+            try {
+                FileStorage files = rec.info.files();
+                String root = rec.directory.getCanonicalPath() + File.separator;
+                List<CompletedFile> completed = new ArrayList<>();
+                for (int i = 0; i < files.numFiles(); i++) {
+                    File disk = new File(rec.directory, files.filePath(i));
+                    if (!disk.getCanonicalPath().startsWith(root)) continue;
+                    if (th.filePriority(i) == Priority.IGNORE) {
+                        if (disk.isFile() && !disk.delete()) Log.w(TAG, "Could not remove skipped file: " + disk.getName());
+                    } else {
+                        completed.add(new CompletedFile(disk.getAbsolutePath(), files.fileSize(i)));
+                        if (disk.isFile()) notifyMediaScanner(disk);
+                    }
+                }
+                h.completedFilesJson = new com.google.gson.Gson().toJson(completed);
+                main.post(() -> persistAsync(h));
+            } catch (Exception exception) { Log.w(TAG, "Completion cleanup failed", exception); }
+        });
+    }
+
     /** Background: read DB, re-add each torrent to libtorrent. */
     private void restoreFromDb() {
         List<DownloadEntity> rows;
@@ -1151,6 +1265,7 @@ public class TorrentManager {
 
         for (DownloadEntity e : rows) {
             final DownloadEntity row = e;
+            final boolean missing = completedFilesMissing(row);
             main.post(() -> {
                 DownloadHandle h = new DownloadHandle(
                         row.infoHash,
@@ -1160,6 +1275,11 @@ public class TorrentManager {
                         row.sizeBytes,
                         row.magnetUrl != null ? row.magnetUrl : ""
                 );
+                h.downloadDirectory = row.downloadDirectory;
+                h.selectedFilesJson = row.selectedFilesJson;
+                h.completedFilesJson = row.completedFilesJson;
+                h.progress.setValue(new DownloadHandle.Progress(row.lastProgress, 0, 0, 0,
+                        row.lastProgress == 100 ? row.sizeBytes : 0, row.sizeBytes));
                 // Resume state from DB (most likely PAUSED until we re-add)
                 DownloadHandle.State[] states = DownloadHandle.State.values();
                 if (row.lastState >= 0 && row.lastState < states.length) {
@@ -1171,6 +1291,12 @@ public class TorrentManager {
                 }
                 handles.put(row.infoHash, h);
                 publishList();
+                if (missing) {
+                    h.state.setValue(DownloadHandle.State.ERROR);
+                    h.errorMessage.setValue("File missing");
+                    persistAsync(h);
+                    return;
+                }
 
                 // Decide whether to restore as paused or as actively-downloading.
                 // Default policy: NEVER auto-resume on launch (saves the user
@@ -1182,6 +1308,11 @@ public class TorrentManager {
                         (row.lastState >= 0 && row.lastState < states.length)
                                 ? states[row.lastState]
                                 : DownloadHandle.State.PAUSED;
+                if (missing) {
+                    stateOnDisk = DownloadHandle.State.ERROR;
+                    h.errorMessage.setValue("File missing");
+                    h.state.setValue(DownloadHandle.State.ERROR);
+                }
 
                 boolean restorePaused;
                 DownloadHandle.State targetState;
@@ -1189,8 +1320,8 @@ public class TorrentManager {
                     // Hard policy: anything that wasn't already in a terminal
                     // state goes back as PAUSED. FINISHED stays FINISHED.
                     restorePaused = true;
-                    targetState = stateOnDisk == DownloadHandle.State.FINISHED
-                            ? DownloadHandle.State.FINISHED
+                    targetState = stateOnDisk == DownloadHandle.State.FINISHED || stateOnDisk == DownloadHandle.State.ERROR
+                            ? stateOnDisk
                             : DownloadHandle.State.PAUSED;
                 } else {
                     restorePaused =
@@ -1213,8 +1344,10 @@ public class TorrentManager {
                     stub.infoHash = row.infoHash;
                     stub.magnetUrl = row.magnetUrl;
                     addToSession(cached, stub, h, restorePaused, targetState);
-                } else if (row.magnetUrl != null && !row.magnetUrl.isEmpty()) {
+                } else if (!restorePaused && row.magnetUrl != null && !row.magnetUrl.isEmpty()) {
                     startWithMagnet(row.magnetUrl, h);
+                } else {
+                    h.state.setValue(targetState);
                 }
             });
         }
@@ -1238,6 +1371,9 @@ public class TorrentManager {
         e.lastState = s == null ? 0 : s.ordinal();
         DownloadHandle.Progress p = h.progress.getValue();
         e.lastProgress = p == null ? 0 : p.percent;
+        e.downloadDirectory = h.downloadDirectory;
+        e.selectedFilesJson = h.selectedFilesJson;
+        e.completedFilesJson = h.completedFilesJson;
         io.execute(() -> {
             try { dao.upsert(e); }
             catch (Throwable t2) { Log.e(TAG, "persist failed", t2); }
@@ -1334,7 +1470,15 @@ public class TorrentManager {
                 for (int i : videoIndices) wantedFiles.add(i);
                 for (int i : subtitleIndices) wantedFiles.add(i);
                 if (videoIndices.isEmpty() && videoIdx >= 0) wantedFiles.add(videoIdx);
-                int boundaryFiles = includePieceBoundaryFiles(files, ti.pieceLength(), wantedFiles);
+                if (handle.selectedFilesJson != null) {
+                    int[] saved = new com.google.gson.Gson().fromJson(handle.selectedFilesJson, int[].class);
+                    wantedFiles.clear();
+                    if (saved != null) for (int index : saved) if (index >= 0 && index < files.numFiles()) wantedFiles.add(index);
+                }
+                int boundaryFiles = 0;
+                handle.selectedFilesJson = new com.google.gson.Gson().toJson(wantedFiles);
+                File directory = handle.downloadDirectory == null ? saveDir : new File(handle.downloadDirectory);
+                handle.downloadDirectory = directory.getAbsolutePath();
 
                 Priority[] priorities = new Priority[files.numFiles()];
                 for (int i = 0; i < priorities.length; i++) {
@@ -1386,7 +1530,7 @@ public class TorrentManager {
                 File resumeFile = new File(torrentFileCacheDir, item.infoHash + ".resume");
                 File resumeArg = (resumeFile.exists() && resumeFile.length() > 0) ? resumeFile : null;
 
-                session.download(ti, saveDir, resumeArg, priorities, null, flags);
+                session.download(ti, directory, resumeArg, priorities, null, flags);
                 TorrentHandle th = session.find(ti.infoHash());
                 if (th == null || !th.isValid()) {
                     throw new IllegalStateException("session.find() returned null after download()");
@@ -1433,10 +1577,11 @@ public class TorrentManager {
         TorrentRecord rec = new TorrentRecord();
         rec.hash = ti.infoHash();
         rec.info = ti;
+        rec.directory = handle.downloadDirectory == null ? saveDir : new File(handle.downloadDirectory);
         rec.videoFileIndex = videoIdx;
         if (videoIdx >= 0) {
             rec.videoFileSize = files.fileSize(videoIdx);
-            rec.videoFilePath = new File(saveDir, files.filePath(videoIdx));
+            rec.videoFilePath = new File(rec.directory, files.filePath(videoIdx));
             int pieceSize = ti.pieceLength();
             long offset = files.fileOffset(videoIdx);
             rec.videoFirstPiece = (int) (offset / pieceSize);
@@ -1457,7 +1602,7 @@ public class TorrentManager {
             }
         }
         for (int i : subtitleIndices) {
-            rec.subtitleFiles.add(new File(saveDir, files.filePath(i)));
+            rec.subtitleFiles.add(new File(rec.directory, files.filePath(i)));
         }
         records.put(handle.infoHash, rec);
         if (!rec.subtitleFiles.isEmpty()) {
@@ -1623,6 +1768,7 @@ public class TorrentManager {
             AlertType.STATE_UPDATE.swig(),
             AlertType.TORRENT_FINISHED.swig(),
             AlertType.TORRENT_CHECKED.swig(),
+            AlertType.TORRENT_PAUSED.swig(),
             AlertType.TORRENT_ERROR.swig(),
             AlertType.SAVE_RESUME_DATA.swig(),
     };
@@ -1641,6 +1787,12 @@ public class TorrentManager {
             catch (Throwable ex) { return; }
 
             switch (t) {
+                case TORRENT_PAUSED:
+                    if (alert instanceof org.libtorrent4j.alerts.TorrentPausedAlert) {
+                        final String hex = ((org.libtorrent4j.alerts.TorrentPausedAlert) alert).handle().infoHash().toHex();
+                        main.post(() -> finalizeCompletedFiles(hex));
+                    }
+                    break;
                 case STATE_UPDATE:
                     // No data needed; coalesce multiple updates onto main
                     if (refreshPending.compareAndSet(false, true)) {
@@ -1706,7 +1858,8 @@ public class TorrentManager {
 
     private void onCheckedByHex(String hex) {
         String key = hex == null ? "" : hex.toLowerCase(Locale.US);
-        rechecking.remove(key);
+        // Startup checks must never turn a paused/completed download into a repair.
+        if (!rechecking.remove(key)) return;
         DownloadHandle dh = handles.get(key);
         TorrentRecord rec = records.get(key);
         if (rec == null || rec.hash == null || session == null) return;
@@ -1746,6 +1899,8 @@ public class TorrentManager {
         String key = hex == null ? "" : hex.toLowerCase(Locale.US);
         if (rechecking.contains(key)) return;
         DownloadHandle dh = handles.get(key);
+        if (dh != null && (dh.state.getValue() == DownloadHandle.State.ERROR
+                || dh.state.getValue() == DownloadHandle.State.PAUSED)) return;
         TorrentRecord rec = records.get(key);
         if (dh != null) {
             dh.state.setValue(DownloadHandle.State.FINISHED);
@@ -1822,6 +1977,8 @@ public class TorrentManager {
         // Suppress reported speed for paused / finished torrents so the UI
         // doesn't jitter with leftover stats from libtorrent's last sample.
         DownloadHandle.State curState = h.state.getValue();
+        if ((curState == DownloadHandle.State.FINISHED || curState == DownloadHandle.State.ERROR)
+                && !rechecking.contains(key)) return;
         boolean stoppedish = curState == DownloadHandle.State.PAUSED
                 || curState == DownloadHandle.State.FINISHED
                 || (pct >= 100 && missingWanted == 0 && !rechecking.contains(key));

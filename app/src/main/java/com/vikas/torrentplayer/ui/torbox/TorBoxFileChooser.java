@@ -21,6 +21,32 @@ public final class TorBoxFileChooser {
 
     private TorBoxFileChooser() {}
 
+    public static void showVideos(Activity ctx, TorBoxClient.TbTorrent torrent) {
+        List<TorBoxClient.TbFile> videos = new ArrayList<>();
+        for (TorBoxClient.TbFile file : torrent.files) if (file.isVideo()) videos.add(file);
+        if (videos.isEmpty()) {
+            Toast.makeText(ctx, "No playable videos available", Toast.LENGTH_LONG).show();
+            return;
+        }
+        CharSequence[] labels = new CharSequence[videos.size()];
+        for (int i = 0; i < videos.size(); i++) labels[i] = videos.get(i).name;
+        new MaterialAlertDialogBuilder(ctx).setTitle("Play with TorBox")
+                .setItems(labels, (dialog, index) -> stream(ctx, torrent.id, videos.get(index).id)).show();
+    }
+
+    public static void downloadAll(Activity ctx, TorBoxClient.TbTorrent torrent, String title) {
+        if (!torrent.finished || torrent.files == null || torrent.files.isEmpty()) {
+            Toast.makeText(ctx, "Torrent is not ready yet. Refresh the TorBox library when it finishes.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        TorBoxManager.get().init(ctx);
+        for (TorBoxClient.TbFile file : torrent.files) {
+            TorBoxManager.get().downloadFile(torrent.id, file.id, file.name, file.size,
+                    title + " - " + (file.shortName != null ? file.shortName : file.name));
+        }
+        Toast.makeText(ctx, "All files queued in Downloads", Toast.LENGTH_LONG).show();
+    }
+
     public static void show(Activity ctx, TorBoxClient.TbTorrent torrent, String title) {
         if (torrent == null || torrent.files == null || torrent.files.isEmpty()) {
             Toast.makeText(ctx, "No files in this torrent", Toast.LENGTH_LONG).show();

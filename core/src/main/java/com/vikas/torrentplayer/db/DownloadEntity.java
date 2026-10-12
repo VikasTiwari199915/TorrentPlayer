@@ -38,4 +38,7 @@ public class DownloadEntity {
 
     /** 0..100 progress as of last update. */
     public int lastProgress;
+    public String downloadDirectory;
+    public String selectedFilesJson;
+    public String completedFilesJson;
 }

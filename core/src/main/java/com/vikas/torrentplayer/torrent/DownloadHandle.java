@@ -29,6 +29,9 @@ public class DownloadHandle {
     public final String quality;
     public final long sizeBytes;
     public final String magnetUrl;
+    public volatile String downloadDirectory;
+    public volatile String selectedFilesJson;
+    public volatile String completedFilesJson;
 
     public final MutableLiveData<State> state = new MutableLiveData<>(State.STARTING);
     public final MutableLiveData<Progress> progress;

@@ -13,7 +13,11 @@
         android:icon="@drawable/rounded_download_24"
         android:title="@string/nav_downloads" />
     <item
-        android:id="@+id/settingsFragment"
-        android:icon="@drawable/rounded_settings_24"
-        android:title="@string/nav_settings" />
+        android:id="@+id/favoritesFragment"
+        android:icon="@drawable/rounded_star_24"
+        android:title="Favorites" />
+    <item
+        android:id="@+id/torBoxFragment"
+        android:icon="@drawable/rounded_folder_24"
+        android:title="TorBox" />
 </menu>
