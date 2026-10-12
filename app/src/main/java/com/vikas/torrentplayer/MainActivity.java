@@ -69,28 +69,14 @@ public class MainActivity extends AppCompatActivity {
                         @Override public void onFragmentViewCreated(
                                 androidx.fragment.app.FragmentManager fm, androidx.fragment.app.Fragment fragment,
                                 android.view.View view, Bundle state) {
-                            if (nav.getCurrentDestination() != null
-                                    && nav.getCurrentDestination().getId() == R.id.settingsFragment) return;
-                            androidx.appcompat.widget.Toolbar toolbar = findToolbar(view);
-                            if (toolbar != null) {
-                                android.view.MenuItem settings = toolbar.getMenu().add(R.string.nav_settings);
-                                settings.setIcon(R.drawable.rounded_settings_24);
-                                settings.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS);
-                                settings.getIcon().setTint(com.google.android.material.color.MaterialColors.getColor(
-                                        toolbar, com.google.android.material.R.attr.colorOnSurface));
-                                settings.setOnMenuItemClickListener(item -> { nav.navigate(R.id.settingsFragment); return true; });
-                            }
+                            addSettingsAction(fragment, view, nav);
                         }
                     }, false);
-            // The initial destination may have been inflated before registration.
-            androidx.appcompat.widget.Toolbar firstToolbar = findToolbar(host.requireView());
-            if (firstToolbar != null) {
-                android.view.MenuItem settings = firstToolbar.getMenu().add(R.string.nav_settings);
-                settings.setIcon(R.drawable.rounded_settings_24);
-                settings.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS);
-                settings.getIcon().setTint(com.google.android.material.color.MaterialColors.getColor(
-                        firstToolbar, com.google.android.material.R.attr.colorOnSurface));
-                settings.setOnMenuItemClickListener(item -> { nav.navigate(R.id.settingsFragment); return true; });
+            // Restored destinations may already have views. Cold-start views
+            // arrive later through the lifecycle callback; never require them here.
+            for (androidx.fragment.app.Fragment fragment : host.getChildFragmentManager().getFragments()) {
+                android.view.View view = fragment.getView();
+                if (view != null) addSettingsAction(fragment, view, nav);
             }
         }
 
@@ -102,6 +88,26 @@ public class MainActivity extends AppCompatActivity {
         });
 
         checkForUpdate();
+    }
+
+    private static void addSettingsAction(androidx.fragment.app.Fragment fragment,
+                                          android.view.View view, NavController nav) {
+        if (fragment instanceof com.vikas.torrentplayer.ui.settings.SettingsFragment) return;
+        androidx.appcompat.widget.Toolbar toolbar = findToolbar(view);
+        if (toolbar == null || toolbar.getMenu().findItem(R.id.action_open_settings) != null) return;
+        android.view.MenuItem settings = toolbar.getMenu().add(
+                android.view.Menu.NONE, R.id.action_open_settings, android.view.Menu.NONE, R.string.nav_settings);
+        settings.setIcon(R.drawable.rounded_settings_24);
+        settings.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS);
+        settings.getIcon().setTint(com.google.android.material.color.MaterialColors.getColor(
+                toolbar, com.google.android.material.R.attr.colorOnSurface));
+        settings.setOnMenuItemClickListener(item -> {
+            if (nav.getCurrentDestination() != null
+                    && nav.getCurrentDestination().getId() != R.id.settingsFragment) {
+                nav.navigate(R.id.settingsFragment);
+            }
+            return true;
+        });
     }
 
     private static androidx.appcompat.widget.Toolbar findToolbar(android.view.View view) {
