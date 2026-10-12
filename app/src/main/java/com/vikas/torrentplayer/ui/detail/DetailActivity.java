@@ -150,16 +150,9 @@ public class DetailActivity extends AppCompatActivity {
         }
 
         currentResult = result;
-        favoriteAction = b.toolbar.getMenu().add("Add to favorites");
-        favoriteAction.setIcon(R.drawable.rounded_star_24);
-        favoriteAction.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS);
         com.vikas.torrentplayer.db.AppDatabase.get(this).favoriteDao().observeAll().observe(this, favorites -> {
             favoriteRows = favorites;
             updateFavoriteAction();
-        });
-        favoriteAction.setOnMenuItemClickListener(menu -> {
-            com.vikas.torrentplayer.db.Favorites.set(this, currentResult, !menu.isChecked());
-            return true;
         });
         bindHeader(result);
         b.episodeSection.setVisibility(result.isShow() ? View.VISIBLE : View.GONE);
@@ -208,6 +201,7 @@ public class DetailActivity extends AppCompatActivity {
         vm.resultLive().observe(this, r -> {
             if (r == null) return;
             currentResult = r;
+            updateFavoriteAction();
             bindHeader(r);
             b.episodeSection.setVisibility(r.isShow() ? View.VISIBLE : View.GONE);
         });
@@ -285,7 +279,17 @@ public class DetailActivity extends AppCompatActivity {
             @Override public void onReady(TorBoxClient.TbTorrent torrent) {
                 if (isFinishing()) return;
                 dlg.dismiss();
-                if (downloadAll) TorBoxFileChooser.downloadAll(DetailActivity.this, torrent, title);
+                if (downloadAll) {
+                    java.util.List<String> details = new java.util.ArrayList<>();
+                    details.add(title);
+                    for (String value : new String[]{item.quality, item.codec, item.resolutionLabel(), item.audioLabel()})
+                        if (value != null && !value.isEmpty()) details.add(value);
+                    if (item.subtitleLanguages != null && !item.subtitleLanguages.isEmpty())
+                        details.add("Subtitles: " + String.join(", ", item.subtitleLanguages));
+                    if (currentResult != null && currentResult.overview != null) details.add(currentResult.overview);
+                    TorBoxFileChooser.downloadAll(DetailActivity.this, torrent, title,
+                            currentResult == null ? null : currentResult.posterUrl, String.join("\n", details));
+                }
                 else TorBoxFileChooser.showVideos(DetailActivity.this, torrent);
             }
             @Override public void onError(String message) {
@@ -318,11 +322,27 @@ public class DetailActivity extends AppCompatActivity {
         }
     }
 
+    @Override public boolean onCreateOptionsMenu(android.view.Menu menu) {
+        getMenuInflater().inflate(R.menu.detail_menu, menu);
+        favoriteAction = menu.findItem(R.id.action_favorite);
+        updateFavoriteAction();
+        return true;
+    }
+
+    @Override public boolean onOptionsItemSelected(@NonNull android.view.MenuItem item) {
+        if (item.getItemId() == R.id.action_favorite && currentResult != null) {
+            com.vikas.torrentplayer.db.Favorites.set(this, currentResult, !item.isChecked());
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
     private void updateFavoriteAction() {
         if (favoriteAction == null || currentResult == null) return;
         boolean saved = favoriteRows.stream().anyMatch(f -> com.vikas.torrentplayer.db.Favorites.matches(f, currentResult));
         favoriteAction.setTitle(saved ? "Remove from favorites" : "Add to favorites");
         favoriteAction.setChecked(saved);
+        favoriteAction.setIcon(saved ? R.drawable.rounded_star_24 : R.drawable.ic_star_outline);
         favoriteAction.getIcon().setTint(com.google.android.material.color.MaterialColors.getColor(
                 b.toolbar, saved ? androidx.appcompat.R.attr.colorPrimary : com.google.android.material.R.attr.colorOnSurface));
     }

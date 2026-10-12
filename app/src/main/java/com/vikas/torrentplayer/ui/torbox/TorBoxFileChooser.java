@@ -35,15 +35,17 @@ public final class TorBoxFileChooser {
     }
 
     public static void downloadAll(Activity ctx, TorBoxClient.TbTorrent torrent, String title) {
+        downloadAll(ctx, torrent, title, null, null);
+    }
+
+    public static void downloadAll(Activity ctx, TorBoxClient.TbTorrent torrent, String title,
+                                   String poster, String description) {
         if (!torrent.finished || torrent.files == null || torrent.files.isEmpty()) {
             Toast.makeText(ctx, "Torrent is not ready yet. Refresh the TorBox library when it finishes.", Toast.LENGTH_LONG).show();
             return;
         }
         TorBoxManager.get().init(ctx);
-        for (TorBoxClient.TbFile file : torrent.files) {
-            TorBoxManager.get().downloadFile(torrent.id, file.id, file.name, file.size,
-                    title + " - " + (file.shortName != null ? file.shortName : file.name));
-        }
+        TorBoxManager.get().downloadTorrent(torrent, torrent.files, poster, description);
         Toast.makeText(ctx, "All files queued in Downloads", Toast.LENGTH_LONG).show();
     }
 
@@ -78,8 +80,7 @@ public final class TorBoxFileChooser {
         }
         labels.add("Download to device");
         actions.add(() -> {
-            TorBoxManager.get().downloadFile(torrent.id, file.id,
-                    file.shortName != null ? file.shortName : file.name, file.size, title);
+            TorBoxManager.get().downloadTorrent(torrent, java.util.Collections.singletonList(file), null, null);
             Toast.makeText(ctx, "Downloading — track it in Downloads", Toast.LENGTH_LONG).show();
         });
         new MaterialAlertDialogBuilder(ctx)

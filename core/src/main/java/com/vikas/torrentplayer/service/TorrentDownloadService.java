@@ -85,7 +85,7 @@ public class TorrentDownloadService extends Service {
     }
 
     private final Observer<List<DownloadHandle>> listObserver = this::updateForCurrentDownloads;
-    private final Observer<List<com.vikas.torrentplayer.torbox.TorBoxManager.Download>> torBoxObserver =
+    private final Observer<List<com.vikas.torrentplayer.torbox.TorBoxDownload>> torBoxObserver =
             ignored -> updateForCurrentDownloads(TorrentManager.get().downloads().getValue());
 
     private final Handler refreshHandler = new Handler(Looper.getMainLooper());
@@ -106,7 +106,7 @@ public class TorrentDownloadService extends Service {
         TorrentManager.get().init(getApplicationContext());
         TorrentManager.get().downloads().observeForever(listObserver);
         com.vikas.torrentplayer.torbox.TorBoxManager.get().init(this);
-        com.vikas.torrentplayer.torbox.TorBoxManager.get().downloads().observeForever(torBoxObserver);
+        com.vikas.torrentplayer.torbox.TorBoxManager.get().torrentDownloads().observeForever(torBoxObserver);
         refreshHandler.post(refreshTick);
     }
 
@@ -139,7 +139,7 @@ public class TorrentDownloadService extends Service {
     public void onDestroy() {
         refreshHandler.removeCallbacks(refreshTick);
         TorrentManager.get().downloads().removeObserver(listObserver);
-        com.vikas.torrentplayer.torbox.TorBoxManager.get().downloads().removeObserver(torBoxObserver);
+        com.vikas.torrentplayer.torbox.TorBoxManager.get().torrentDownloads().removeObserver(torBoxObserver);
         updatePowerLocks(false);
         super.onDestroy();
     }
@@ -153,9 +153,9 @@ public class TorrentDownloadService extends Service {
                     || s == DownloadHandle.State.BUFFERING
                     || s == DownloadHandle.State.READY) n++;
         }
-        List<com.vikas.torrentplayer.torbox.TorBoxManager.Download> cloud =
-                com.vikas.torrentplayer.torbox.TorBoxManager.get().downloads().getValue();
-        if (cloud != null) for (com.vikas.torrentplayer.torbox.TorBoxManager.Download d : cloud) {
+        List<com.vikas.torrentplayer.torbox.TorBoxDownload> cloud =
+                com.vikas.torrentplayer.torbox.TorBoxManager.get().torrentDownloads().getValue();
+        if (cloud != null) for (com.vikas.torrentplayer.torbox.TorBoxDownload d : cloud) {
             if (d.state == com.vikas.torrentplayer.torbox.TorBoxManager.State.DOWNLOADING) n++;
         }
         return n;
@@ -180,9 +180,9 @@ public class TorrentDownloadService extends Service {
                 }
             }
         }
-        List<com.vikas.torrentplayer.torbox.TorBoxManager.Download> cloud =
-                com.vikas.torrentplayer.torbox.TorBoxManager.get().downloads().getValue();
-        if (cloud != null) for (com.vikas.torrentplayer.torbox.TorBoxManager.Download d : cloud) {
+        List<com.vikas.torrentplayer.torbox.TorBoxDownload> cloud =
+                com.vikas.torrentplayer.torbox.TorBoxManager.get().torrentDownloads().getValue();
+        if (cloud != null) for (com.vikas.torrentplayer.torbox.TorBoxDownload d : cloud) {
             if (d.state == com.vikas.torrentplayer.torbox.TorBoxManager.State.DOWNLOADING) {
                 active++;
                 if (highlight == null) highlight = d.title;

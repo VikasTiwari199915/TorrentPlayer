@@ -123,9 +123,10 @@
                 android:layout_width="0dp"
                 android:layout_height="48dp"
                 android:layout_weight="1"
-                app:icon="@drawable/rounded_play_arrow_24"
                 android:contentDescription="@string/action_play"
-                android:tooltipText="@string/action_play" />
+                android:tooltipText="@string/action_play"
+                app:icon="@drawable/rounded_play_arrow_24"
+                app:iconGravity="textStart" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_torbox_play"
@@ -133,9 +134,10 @@
                 android:layout_width="0dp"
                 android:layout_height="48dp"
                 android:layout_weight="1"
-                app:icon="@drawable/ic_cloud_play"
                 android:contentDescription="Play with TorBox"
-                android:tooltipText="Play with TorBox" />
+                android:tooltipText="Play with TorBox"
+                app:icon="@drawable/ic_cloud_play"
+                app:iconGravity="textStart" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_torbox_download"
@@ -143,30 +145,33 @@
                 android:layout_width="0dp"
                 android:layout_height="48dp"
                 android:layout_weight="1"
-                app:icon="@drawable/ic_cloud_download"
                 android:contentDescription="Download full torrent with TorBox"
-                android:tooltipText="Download full torrent with TorBox" />
+                android:tooltipText="Download full torrent with TorBox"
+                app:icon="@drawable/ic_cloud_download"
+                app:iconGravity="textStart" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_download"
                 style="@style/Widget.Material3.Button.IconButton.Outlined"
                 android:layout_width="0dp"
                 android:layout_height="48dp"
-                android:layout_weight="1"
                 android:layout_marginStart="6dp"
-                app:icon="@drawable/rounded_download_24"
+                android:layout_weight="1"
                 android:contentDescription="@string/action_download"
-                android:tooltipText="@string/action_download" />
+                android:tooltipText="@string/action_download"
+                app:icon="@drawable/rounded_download_24"
+                app:iconGravity="textStart" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_magnet"
                 style="@style/Widget.Material3.Button.IconButton.Outlined"
                 android:layout_width="0dp"
-                android:layout_weight="1"
                 android:layout_height="48dp"
                 android:layout_marginStart="6dp"
+                android:layout_weight="1"
                 android:contentDescription="@string/action_magnet"
-                app:icon="@drawable/rounded_link_2_24" />
+                app:icon="@drawable/rounded_link_2_24"
+                app:iconGravity="textStart" />
         </LinearLayout>
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

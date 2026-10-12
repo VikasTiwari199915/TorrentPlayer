@@ -36,6 +36,7 @@ android {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     // Pull through transitively so consumers don't have to repeat themselves.
     api(libs.appcompat)
     api(libs.lifecycle.viewmodel)

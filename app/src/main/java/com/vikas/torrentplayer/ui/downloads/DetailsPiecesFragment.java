@@ -93,10 +93,6 @@ public class DetailsPiecesFragment extends Fragment {
                     "Missing: %d  ·  Active: %d  ·  Skipped: %d  ·  Available from peers: %s  ·  Unavailable missing: %d",
                     stats.missing, stats.active, stats.skipped, availabilityText,
                     stats.unavailableMissing));
-            setTextIfChanged(b.missingPieces, stats.missing == 0
-                    ? "All wanted pieces are complete."
-                    : "Missing indexes: " + stats.missingIndexes
-                            + (stats.missingIndexesTruncated ? "…" : ""));
         });
     }
 

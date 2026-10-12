@@ -65,24 +65,25 @@ public class DownloadsFragment extends Fragment {
         });
 
         torBoxAdapter = new TorBoxDownloadsAdapter(new TorBoxDownloadsAdapter.Listener() {
-            @Override public void onPlay(com.vikas.torrentplayer.torbox.TorBoxManager.Download d) {
-                if (d.file == null) return;
-                if (d.state == com.vikas.torrentplayer.torbox.TorBoxManager.State.DONE) {
-                    PlayerActivity.startFile(requireContext(), d.file.getAbsolutePath());
+            @Override public void onDetails(com.vikas.torrentplayer.torbox.TorBoxDownload d) {
+                TorBoxDownloadDetailsActivity.start(requireContext(), d.id);
+            }
+            @Override public void onPlay(com.vikas.torrentplayer.torbox.TorBoxDownload d) {
+                TorBoxDownloadDetailsActivity.chooseVideo(requireContext(), d);
+            }
+            @Override public void onPauseToggle(com.vikas.torrentplayer.torbox.TorBoxDownload d) {
+                if (d.state != com.vikas.torrentplayer.torbox.TorBoxManager.State.DOWNLOADING) {
+                    com.vikas.torrentplayer.torbox.TorBoxManager.get().resumeTorrent(d.id);
                 } else {
-                    // Partial playback while downloading (best for progressive MKV).
-                    PlayerActivity.startGrowingFile(requireContext(), d.file.getAbsolutePath(), d.size);
+                    com.vikas.torrentplayer.torbox.TorBoxManager.get().pauseTorrent(d.id);
                 }
             }
-            @Override public void onPauseToggle(com.vikas.torrentplayer.torbox.TorBoxManager.Download d) {
-                if (d.state == com.vikas.torrentplayer.torbox.TorBoxManager.State.PAUSED) {
-                    com.vikas.torrentplayer.torbox.TorBoxManager.get().resume(d.key);
-                } else {
-                    com.vikas.torrentplayer.torbox.TorBoxManager.get().pause(d.key);
-                }
-            }
-            @Override public void onRemove(com.vikas.torrentplayer.torbox.TorBoxManager.Download d) {
-                com.vikas.torrentplayer.torbox.TorBoxManager.get().remove(d.key);
+            @Override public void onRemove(com.vikas.torrentplayer.torbox.TorBoxDownload d) {
+                new MaterialAlertDialogBuilder(requireContext()).setTitle("Remove TorBox download?")
+                        .setMessage("Remove this download from the list. Local files and the TorBox library will be kept.")
+                        .setNegativeButton(R.string.dialog_cancel, null)
+                        .setPositiveButton(R.string.action_remove, (dialog, which) ->
+                                com.vikas.torrentplayer.torbox.TorBoxManager.get().removeTorrent(d.id)).show();
             }
         });
 
@@ -94,11 +95,10 @@ public class DownloadsFragment extends Fragment {
             adapter.submitList(list);
             updateEmpty();
         });
-        com.vikas.torrentplayer.torbox.TorBoxManager.get().downloads()
+        com.vikas.torrentplayer.torbox.TorBoxManager.get().torrentDownloads()
                 .observe(getViewLifecycleOwner(), list -> {
                     torBoxAdapter.submitList(list == null ? new java.util.ArrayList<>()
-                            : new java.util.ArrayList<>(list));
-                    updateEmpty();
+                            : new java.util.ArrayList<>(list), this::updateEmpty);
                 });
 
         // Insets handled declaratively by android:fitsSystemWindows on the

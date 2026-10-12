@@ -16,6 +16,10 @@ public class TorBoxEntity {
     public String key = "";   // "tb:<torrentId>:<fileId>"
 
     public String title;
+    public String torrentName;
+    public String infoHash;
+    public String posterUrl;
+    public String description;
     public long torrentId;
     public int fileId;
     public String fileName;

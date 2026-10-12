@@ -76,6 +76,10 @@
             android:parentActivityName=".MainActivity"
             android:label="TorBox library" />
 
+        <activity android:name=".ui.downloads.TorBoxDownloadDetailsActivity"
+            android:exported="false" android:parentActivityName=".MainActivity"
+            android:label="@string/torbox_details" />
+
         <activity
             android:name=".ui.player.PlayerActivity"
             android:exported="false"

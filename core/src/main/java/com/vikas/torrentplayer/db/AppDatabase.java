@@ -6,7 +6,7 @@ import androidx.room.Database;
 import androidx.room.Room;
 import androidx.room.RoomDatabase;
 
-@Database(entities = { DownloadEntity.class, TorBoxEntity.class, FavoriteEntity.class }, version = 3, exportSchema = false)
+@Database(entities = { DownloadEntity.class, TorBoxEntity.class, FavoriteEntity.class }, version = 4, exportSchema = false)
 public abstract class AppDatabase extends RoomDatabase {
 
     public abstract DownloadDao downloadDao();
@@ -31,6 +31,14 @@ public abstract class AppDatabase extends RoomDatabase {
             };
 
     private static volatile AppDatabase INSTANCE;
+    static final androidx.room.migration.Migration MIGRATION_3_4 =
+            new androidx.room.migration.Migration(3, 4) {
+                @Override public void migrate(androidx.sqlite.db.SupportSQLiteDatabase db) {
+                    for (String column : new String[]{"torrentName", "infoHash", "posterUrl", "description"}) {
+                        db.execSQL("ALTER TABLE torbox_downloads ADD COLUMN " + column + " TEXT");
+                    }
+                }
+            };
 
     public static AppDatabase get(Context ctx) {
         if (INSTANCE == null) {
@@ -40,7 +48,7 @@ public abstract class AppDatabase extends RoomDatabase {
                                     ctx.getApplicationContext(),
                                     AppDatabase.class,
                                     "torrentplayer.db")
-                            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                             .build();
                 }
             }
