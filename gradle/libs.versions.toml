@@ -2,6 +2,7 @@
 agp = "9.3.3"
 appcompat = "1.8.0"
 junit = "1.3.0"
+junitVersion = "4.13.2"
 material = "1.14.0"
 activityKtx = "1.13.0"
 constraintlayout = "2.2.2"
@@ -30,6 +31,7 @@ workRuntime = "2.12.0"
 [libraries]
 core = { module = "androidx.test:core", version.ref = "runner" }
 junit = { module = "androidx.test.ext:junit", version.ref = "junit" }
+junit-junit = { module = "junit:junit", version.ref = "junitVersion" }
 lombok = { group = "org.projectlombok", name = "lombok", version.ref = "lombok" }
 appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
