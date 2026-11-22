@@ -8,6 +8,21 @@ import java.io.IOException;
 import static org.junit.Assert.*;
 
 public class TorBoxPathsTest {
+    @Test public void allocatesReadableFoldersWithoutOverwriting() throws Exception {
+        File root = temp.newFolder();
+        File first = TorBoxPaths.allocateFolder(root, "Spider-Noir Season 1");
+        File next = TorBoxPaths.allocateFolder(root, "Spider-Noir Season 1");
+        assertEquals("Spider-Noir Season 1", first.getName());
+        assertEquals("Spider-Noir Season 1 (2)", next.getName());
+        assertTrue(first.isDirectory()); assertTrue(next.isDirectory());
+    }
+    @Test public void sanitizesFolderNamesAndBoundsLength() throws Exception {
+        File root = temp.newFolder();
+        File folder = TorBoxPaths.allocateFolder(root, "../../bad:name");
+        assertEquals(root.getCanonicalFile(), folder.getParentFile());
+        assertFalse(folder.getName().contains(":"));
+        assertTrue(TorBoxPaths.allocateFolder(root, String.join("", java.util.Collections.nCopies(300, "a"))).getName().length() <= 180);
+    }
     @Rule public TemporaryFolder temp = new TemporaryFolder();
     @Test public void preservesNestedNamesAndExtensions() throws Exception {
         File root = temp.newFolder();

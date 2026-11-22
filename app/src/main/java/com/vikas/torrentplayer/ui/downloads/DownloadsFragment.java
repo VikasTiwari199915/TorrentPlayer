@@ -45,12 +45,12 @@ public class DownloadsFragment extends Fragment {
             public void onRemove(DownloadHandle h) {
                 new MaterialAlertDialogBuilder(requireContext())
                         .setTitle(R.string.dialog_remove_download_title)
-                        .setMessage(R.string.dialog_remove_download_message)
+                        .setMessage("Keep the local files, or delete this download and its local files?")
                         .setNegativeButton(R.string.dialog_cancel, null)
-                        .setPositiveButton(R.string.action_remove, (d, w) -> {
-                            boolean deleteFiles = new PrefsManager(requireContext()).isDeleteOnRemove();
-                            TorrentManager.get().remove(h.infoHash, deleteFiles);
-                        })
+                        .setNeutralButton("Keep files", (d, w) -> TorrentManager.get().remove(h.infoHash, false))
+                        .setPositiveButton("Delete files", (d, w) -> TorrentManager.get().deleteDownload(h.infoHash, error -> {
+                            if (error != null && isAdded()) android.widget.Toast.makeText(requireContext(), "Deletion failed: " + error, android.widget.Toast.LENGTH_LONG).show();
+                        }))
                         .show();
             }
             @Override
@@ -80,10 +80,16 @@ public class DownloadsFragment extends Fragment {
             }
             @Override public void onRemove(com.vikas.torrentplayer.torbox.TorBoxDownload d) {
                 new MaterialAlertDialogBuilder(requireContext()).setTitle("Remove TorBox download?")
-                        .setMessage("Remove this download from the list. Local files and the TorBox library will be kept.")
+                        .setMessage("Keep or delete the local files. Your TorBox cloud library will not be changed.")
                         .setNegativeButton(R.string.dialog_cancel, null)
-                        .setPositiveButton(R.string.action_remove, (dialog, which) ->
-                                com.vikas.torrentplayer.torbox.TorBoxManager.get().removeTorrent(d.id)).show();
+                        .setNeutralButton("Keep files", (dialog, which) -> com.vikas.torrentplayer.torbox.TorBoxManager.get().removeTorrent(d.id))
+                        .setPositiveButton("Delete files", (dialog, which) -> com.vikas.torrentplayer.torbox.TorBoxManager.get().deleteTorrent(d.id,
+                                new com.vikas.torrentplayer.torbox.TorBoxManager.Callback<Void>() {
+                                    @Override public void onResult(Void ignored) {}
+                                    @Override public void onError(String message) {
+                                        if (isAdded()) android.widget.Toast.makeText(requireContext(), "Deletion failed: " + message, android.widget.Toast.LENGTH_LONG).show();
+                                    }
+                                })).show();
             }
         });
 

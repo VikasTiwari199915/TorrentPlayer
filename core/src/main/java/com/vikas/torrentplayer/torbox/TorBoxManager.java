@@ -90,6 +90,7 @@ public final class TorBoxManager {
             d.infoHash = e.infoHash;
             d.posterUrl = e.posterUrl;
             d.description = e.description;
+            d.downloadDirectory = e.downloadDirectory;
             d.size = e.sizeBytes;
             d.percent = e.lastProgress;
             d.file = e.filePath != null ? new File(e.filePath) : null;
@@ -135,6 +136,7 @@ public final class TorBoxManager {
         e.infoHash = d.infoHash;
         e.posterUrl = d.posterUrl;
         e.description = d.description;
+        e.downloadDirectory = d.downloadDirectory;
         e.torrentId = d.torrentId;
         e.fileId = d.fileId;
         e.fileName = d.fileName;
@@ -181,6 +183,8 @@ public final class TorBoxManager {
         public int fileId;
         public String fileName;
         public String torrentName, infoHash, posterUrl, description;
+        public String downloadDirectory;
+        public boolean removing;
         public long downloaded;
         final java.util.concurrent.atomic.AtomicInteger generation = new java.util.concurrent.atomic.AtomicInteger();
         final AtomicBoolean running = new AtomicBoolean();
@@ -286,6 +290,10 @@ public final class TorBoxManager {
     @MainThread
     public Download downloadFile(long torrentId, int fileId, @NonNull String fileName,
                                  long size, @NonNull String title) {
+        return downloadFile(torrentId, fileId, fileName, size, title, null);
+    }
+    private Download downloadFile(long torrentId, int fileId, String fileName,
+                                  long size, String title, File directory) {
         String key = "tb:" + torrentId + ":" + fileId;
         Download existing = items.get(key);
         if (existing != null) return existing;
@@ -295,7 +303,8 @@ public final class TorBoxManager {
         d.fileName = fileName;
         d.size = size;
         try {
-            d.file = destinationFor(torrentId, fileId, fileName);
+            d.file = directory == null ? destinationFor(torrentId, fileId, fileName) : TorBoxPaths.resolve(directory, fileName);
+            d.downloadDirectory = directory == null ? d.file.getParent() : directory.getAbsolutePath();
             for (Download other : items.values()) {
                 if (d.file.equals(other.file)) {
                     d.file = null;
@@ -321,8 +330,32 @@ public final class TorBoxManager {
             afterRestore.add(() -> downloadTorrent(torrent, files, poster, description));
             return;
         }
+        File directory = null;
+        for (Download existing : items.values()) {
+            if (existing.torrentId != torrent.id) continue;
+            if (existing.removing) return;
+            if (existing.downloadDirectory != null) directory = new File(existing.downloadDirectory);
+            else {
+                // Preserve legacy paths; new files in an existing group stay in its old root.
+                File base = TorrentManager.get().getSaveDir();
+                if (base == null) base = appContext.getExternalFilesDir(null);
+                if (base != null) directory = new File(base, "TorBox/" + torrent.id);
+            }
+            break;
+        }
+        if (directory == null) {
+            try {
+                File base = TorrentManager.get().getSaveDir();
+                if (base == null) base = appContext.getExternalFilesDir(null);
+                if (base == null) throw new IOException("Download storage unavailable");
+                directory = TorBoxPaths.allocateFolder(new File(base, "TorBox"), torrent.name);
+            } catch (IOException error) {
+                android.widget.Toast.makeText(appContext, error.getMessage(), android.widget.Toast.LENGTH_LONG).show();
+                return;
+            }
+        }
         for (TorBoxClient.TbFile file : files) {
-            Download d = downloadFile(torrent.id, file.id, file.name, file.size, torrent.name);
+            Download d = downloadFile(torrent.id, file.id, file.name, file.size, torrent.name, directory);
             d.torrentName = torrent.name;
             d.infoHash = torrent.hash;
             d.fileName = file.name;
@@ -356,7 +389,59 @@ public final class TorBoxManager {
         for (Download d : new ArrayList<>(items.values())) if (d.torrentId == id) resume(d.key);
     }
     public void removeTorrent(long id) {
+        for (Download d : items.values()) if (d.torrentId == id && d.removing) return;
         for (Download d : new ArrayList<>(items.values())) if (d.torrentId == id) remove(d.key);
+    }
+
+    public void deleteTorrent(long id, Callback<Void> callback) {
+        List<Download> group = new ArrayList<>();
+        for (Download d : items.values()) if (d.torrentId == id) {
+            if (d.removing) return;
+            group.add(d);
+        }
+        for (Download d : group) {
+            d.removing = true; d.cancelled.set(true); interrupt(d);
+            d.state = State.PAUSED; d.speed = 0; persist(d);
+        }
+        publish();
+        awaitStoppedForDeletion(group, callback, System.currentTimeMillis() + 120000);
+    }
+
+    private void awaitStoppedForDeletion(List<Download> group, Callback<Void> callback, long deadline) {
+        if (group.stream().anyMatch(d -> d.running.get())) {
+            if (System.currentTimeMillis() < deadline) {
+                main.postDelayed(() -> awaitStoppedForDeletion(group, callback, deadline), 100);
+                return;
+            }
+            deletionFailed(group, callback, "Transfer is still stopping. Retry deletion shortly.");
+            return;
+        }
+        List<File> protectedFiles = new ArrayList<>();
+        for (Download other : items.values()) if (!group.contains(other) && other.file != null) protectedFiles.add(other.file);
+        io.execute(() -> {
+            try {
+                for (Download d : group) if (d.file != null) {
+                    for (File protectedFile : protectedFiles) if (d.file.getCanonicalFile().equals(protectedFile.getCanonicalFile()))
+                        throw new IOException("File is also used by another download");
+                    File root = d.downloadDirectory == null ? d.file.getParentFile() : new File(d.downloadDirectory);
+                    com.vikas.torrentplayer.utils.DownloadFiles.delete(root, java.util.Collections.singletonList(d.file));
+                    MediaScannerConnection.scanFile(appContext, new String[]{d.file.getAbsolutePath()}, null, null);
+                    if (d.downloadDirectory != null) root.delete(); // Only removes an empty owned directory.
+                }
+                for (Download d : group) dao().deleteByKey(d.key);
+                main.post(() -> {
+                    for (Download d : group) items.remove(d.key, d);
+                    publish(); callback.onResult(null);
+                });
+            } catch (Exception error) { main.post(() -> deletionFailed(group, callback, msg(error))); }
+        });
+    }
+
+    private void deletionFailed(List<Download> group, Callback<Void> callback, String error) {
+        for (Download d : group) {
+            d.removing = false; d.state = State.ERROR; d.error = "Deletion failed: " + error; persist(d);
+        }
+        publish(); callback.onError(error);
     }
 
     private void interrupt(Download d) {
@@ -406,7 +491,8 @@ public final class TorBoxManager {
     @MainThread
     public void resume(String key) {
         Download d = items.get(key);
-        if (d == null || (d.state != State.PAUSED && d.state != State.ERROR) || d.file == null) return;
+        if (d == null || d.removing || (d.state != State.PAUSED && d.state != State.ERROR) || d.file == null) return;
+        d.cancelled.set(false);
         d.generation.incrementAndGet();
         d.pauseRequested.set(false);
         d.error = null;
@@ -546,6 +632,8 @@ public final class TorBoxManager {
             copy.posterUrl = item.posterUrl;
             copy.infoHash = item.infoHash;
             copy.description = item.description;
+            copy.downloadDirectory = item.downloadDirectory;
+            copy.removing = item.removing;
             copy.downloaded = item.downloaded;
             copy.size = item.size;
             copy.state = item.state;

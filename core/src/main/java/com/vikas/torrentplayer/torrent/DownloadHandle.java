@@ -32,6 +32,11 @@ public class DownloadHandle {
     public volatile String downloadDirectory;
     public volatile String selectedFilesJson;
     public volatile String completedFilesJson;
+    public volatile Integer preferredFileIndex;
+    public volatile int selectionRevision;
+    public volatile boolean selectionPending;
+    public volatile boolean selectionRechecking;
+    public volatile boolean removing;
 
     public final MutableLiveData<State> state = new MutableLiveData<>(State.STARTING);
     public final MutableLiveData<Progress> progress;

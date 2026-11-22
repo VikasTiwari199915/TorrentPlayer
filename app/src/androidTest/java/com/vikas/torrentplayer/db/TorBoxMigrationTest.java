@@ -24,12 +24,13 @@ public class TorBoxMigrationTest {
                 old.setVersion(3);
             }
             AppDatabase db = Room.databaseBuilder(context, AppDatabase.class, name)
-                    .addMigrations(AppDatabase.MIGRATION_3_4).build();
+                    .addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5).build();
             try {
                 TorBoxEntity file = db.torBoxDao().getAll().get(0);
                 assertEquals("/old/media/TorBox/42/1/episode.mkv", file.filePath);
                 assertEquals(1, file.lastState); assertEquals(45, file.lastProgress);
                 assertNull(file.posterUrl);
+                assertNull(file.downloadDirectory);
                 file.posterUrl = "https://example.test/poster.jpg"; file.torrentName = "Example season";
                 db.torBoxDao().upsert(file);
                 assertEquals(file.posterUrl, db.torBoxDao().getAll().get(0).posterUrl);

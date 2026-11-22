@@ -117,6 +117,8 @@ public class TorrentManager {
 
     private final Map<String, DownloadHandle> handles = new LinkedHashMap<>();
     private final Map<String, TorrentRecord> records = new HashMap<>();
+    private final Map<String, Runnable> pendingDeletes = new HashMap<>();
+    private final Map<String, java.util.function.Consumer<String>> deleteFailures = new HashMap<>();
     private final Set<String> rechecking = Collections.synchronizedSet(new LinkedHashSet<>());
 
     private final MutableLiveData<List<DownloadHandle>> allDownloads = new MutableLiveData<>(new ArrayList<>());
@@ -149,6 +151,9 @@ public class TorrentManager {
     }
 
     private static class TorrentRecord {
+        DownloadHandle owner;
+        int scheduledFile = -2;
+        int scheduledRevision = -1;
         Sha1Hash hash;
         TorrentInfo info;
         int videoFileIndex = -1;
@@ -622,6 +627,7 @@ public class TorrentManager {
 
         String hash = item.infoHash != null ? item.infoHash.toLowerCase(Locale.US) : item.magnetUrl;
         DownloadHandle handle = handles.get(hash);
+        if (handle != null && handle.removing) return handle;
         if (handle == null) {
             handle = new DownloadHandle(
                     hash,
@@ -654,6 +660,7 @@ public class TorrentManager {
     @MainThread
     public void pause(String infoHash) {
         DownloadHandle h = handles.get(infoHash);
+        if (h != null && h.removing) return;
         TorrentRecord rec = records.get(infoHash);
         if (h == null || rec == null || rec.hash == null) return;
         // UI/state first (instant feedback), libtorrent JNI off the main thread —
@@ -687,7 +694,7 @@ public class TorrentManager {
     public void resume(String infoHash) {
         DownloadHandle h = handles.get(infoHash);
         TorrentRecord rec = records.get(infoHash);
-        if (h == null) return;
+        if (h == null || h.removing) return;
         if (rec == null || rec.hash == null) { restartDownload(infoHash); return; }
         if (h.state.getValue() == DownloadHandle.State.PAUSED) {
             h.state.setValue(DownloadHandle.State.BUFFERING);
@@ -712,7 +719,9 @@ public class TorrentManager {
     private void stopSeedingFor(TorrentRecord rec) {
         if (rec == null || rec.hash == null || session == null) return;
         final Sha1Hash hash = rec.hash;
+        int revision = rec.owner.selectionRevision;
         io.execute(() -> {
+            if (rec.owner.selectionPending || revision != rec.owner.selectionRevision) return;
             TorrentHandle th = session.find(hash);
             if (th == null || !th.isValid()) return;
             try {
@@ -745,9 +754,14 @@ public class TorrentManager {
 
     @MainThread
     public void remove(String infoHash, boolean deleteFiles) {
+        if (deleteFiles) { deleteDownload(infoHash, error -> {
+            if (error != null) Log.w(TAG, "Delete failed: " + error);
+        }); return; }
+        if (pendingDeletes.containsKey(infoHash)) return;
         DownloadHandle h = handles.remove(infoHash);
         TorrentRecord rec = records.remove(infoHash);
         if (h == null) return;
+        h.removing = true;
 
         DownloadHandle a = active.getValue();
         if (a != null && a.infoHash.equals(infoHash)) active.setValue(null);
@@ -775,6 +789,83 @@ public class TorrentManager {
             if (resume.exists()) //noinspection ResultOfMethodCallIgnored
                 resume.delete();
             dao.deleteByHash(infoHash);
+        });
+    }
+
+    /** Keep the row until native deletion and an explicit disk check have succeeded. */
+    @MainThread
+    public void deleteDownload(String key, java.util.function.Consumer<String> result) {
+        if (pendingDeletes.containsKey(key)) return;
+        DownloadHandle h = handles.get(key);
+        if (h == null) { result.accept("Download no longer exists"); return; }
+        TorrentRecord rec = records.get(key);
+        h.state.setValue(DownloadHandle.State.PAUSED);
+        h.errorMessage.setValue("Deleting local files...");
+        h.selectionRevision++;
+        persistAsync(h);
+        h.removing = true;
+        List<TorrentRecord> others = new ArrayList<>();
+        for (Map.Entry<String, TorrentRecord> entry : records.entrySet()) if (!entry.getKey().equals(key)) others.add(entry.getValue());
+        java.util.function.Consumer<String> failed = error -> {
+            pendingDeletes.remove(key); deleteFailures.remove(key);
+            h.removing = false;
+            h.state.setValue(DownloadHandle.State.ERROR);
+            h.errorMessage.setValue("Deletion failed: " + error);
+            persistAsync(h); result.accept(error);
+        };
+        deleteFailures.put(key, failed);
+        pendingDeletes.put(key, () -> {});
+        io.execute(() -> {
+            try {
+                File root = rec != null ? rec.directory : h.downloadDirectory == null ? saveDir : new File(h.downloadDirectory);
+                TorrentInfo info = rec == null ? null : rec.info;
+                File cached = new File(torrentFileCacheDir, key + ".torrent");
+                if (info == null && cached.isFile()) info = new TorrentInfo(readBytes(cached));
+                if (root == null || info == null || !info.isValid())
+                    throw new IOException("Torrent metadata unavailable; files were not deleted");
+                List<File> files = new ArrayList<>();
+                String boundary = root.getCanonicalPath() + File.separator;
+                for (int i = 0; i < info.files().numFiles(); i++) {
+                    File file = new File(root, info.files().filePath(i));
+                    if (!file.getCanonicalPath().startsWith(boundary) || java.nio.file.Files.isSymbolicLink(file.toPath())) throw new IOException("Unsafe torrent path");
+                    files.add(file);
+                }
+                for (TorrentRecord other : others) if (other.info != null && other.directory != null)
+                    for (int i = 0; i < other.info.files().numFiles(); i++)
+                        for (File file : files) if (file.getCanonicalFile().equals(new File(other.directory, other.info.files().filePath(i)).getCanonicalFile()))
+                            throw new IOException("Files are shared with another download; remove from list instead");
+                java.util.concurrent.atomic.AtomicBoolean finishing = new java.util.concurrent.atomic.AtomicBoolean();
+                Runnable finish = () -> { if (!finishing.compareAndSet(false, true)) return; io.execute(() -> {
+                    try {
+                        com.vikas.torrentplayer.utils.DownloadFiles.delete(root, files);
+                        android.media.MediaScannerConnection.scanFile(appContext, files.stream().map(File::getAbsolutePath).toArray(String[]::new), null, null);
+                        cached.delete();
+                        new File(torrentFileCacheDir, key + ".resume").delete();
+                        dao.deleteByHash(key);
+                        main.post(() -> {
+                            pendingDeletes.remove(key); deleteFailures.remove(key);
+                            handles.remove(key); records.remove(key);
+                            if (active.getValue() == h) active.setValue(null);
+                            publishList(); result.accept(null);
+                        });
+                    } catch (Exception error) { main.post(() -> failed.accept(error.getMessage())); }
+                }); };
+                TorrentHandle nativeHandle = session == null ? null : session.find(info.infoHash());
+                main.post(() -> {
+                    pendingDeletes.put(key, finish);
+                    if (nativeHandle == null || !nativeHandle.isValid()) { finish.run(); return; }
+                    io.execute(() -> {
+                        try {
+                            nativeHandle.unsetFlags(TorrentFlags.AUTO_MANAGED);
+                            nativeHandle.pause();
+                            session.remove(nativeHandle, SessionHandle.DELETE_FILES);
+                        } catch (Exception error) { main.post(() -> failed.accept(error.getMessage())); }
+                    });
+                    main.postDelayed(() -> {
+                        if (!finishing.get() && pendingDeletes.get(key) == finish) failed.accept("Timed out waiting for disk deletion; retry");
+                    }, 60000);
+                });
+            } catch (Exception error) { main.post(() -> failed.accept(error.getMessage())); }
         });
     }
 
@@ -867,7 +958,16 @@ public class TorrentManager {
                 for (int i = 0; i < fileCount; i++) {
                     wanted[i] = th.filePriority(i) != Priority.IGNORE;
                 }
-                main.post(() -> callback.onFileStats(new FileStats(progress, wanted)));
+                main.post(() -> {
+                    DownloadHandle handle = handles.get(key);
+                    if (handle != null && handle.selectedFilesJson != null) {
+                        int[] selected = new com.google.gson.Gson().fromJson(handle.selectedFilesJson, int[].class);
+                        java.util.Arrays.fill(wanted, false);
+                        if (selected != null) for (int index : selected)
+                            if (index >= 0 && index < wanted.length) wanted[index] = true;
+                    }
+                    callback.onFileStats(new FileStats(progress, wanted));
+                });
             } catch (Throwable t) {
                 Log.w(TAG, "loadFileStats failed for " + key, t);
                 main.post(() -> callback.onFileStats(null));
@@ -996,6 +1096,7 @@ public class TorrentManager {
         if (infoHash == null || infoHash.isEmpty()) return;
         String key = infoHash.toLowerCase(Locale.US);
         DownloadHandle h = handles.get(key);
+        if (h != null && h.removing) return;
         rechecking.add(key);
         if (h != null) {
             h.errorMessage.postValue(null);
@@ -1035,7 +1136,7 @@ public class TorrentManager {
         String key = infoHash.toLowerCase(Locale.US);
         DownloadHandle h = handles.get(key);
         TorrentRecord rec = records.get(key);
-        if (h == null || session == null) return;
+        if (h == null || h.removing || session == null) return;
 
         h.completedFilesJson = null;
         if (rec == null || rec.hash == null) {
@@ -1083,6 +1184,31 @@ public class TorrentManager {
         DownloadHandle h = handles.get(key);
         TorrentRecord rec = records.get(key);
         if (h == null || rec == null || rec.hash == null || rec.info == null || session == null) return;
+        if (pendingDeletes.containsKey(key)) return;
+
+        // filePriority setters are asynchronous. Persist user intent rather than
+        // immediately reading back a native snapshot that can still be stale.
+        java.util.Set<Integer> wantedFiles = new java.util.LinkedHashSet<>();
+        if (h.selectedFilesJson != null) {
+            int[] saved = new com.google.gson.Gson().fromJson(h.selectedFilesJson, int[].class);
+            if (saved != null) for (int index : saved) wantedFiles.add(index);
+        } else {
+            wantedFiles.addAll(findAllVideoFiles(rec.info.files()));
+            wantedFiles.addAll(findSubtitleFiles(rec.info.files()));
+            if (wantedFiles.isEmpty() && rec.videoFileIndex >= 0) wantedFiles.add(rec.videoFileIndex);
+        }
+        for (int index : fileIndices) {
+            if (index < 0 || index >= rec.info.files().numFiles()) continue;
+            if (enable) wantedFiles.add(index); else wantedFiles.remove(index);
+        }
+        h.selectedFilesJson = new com.google.gson.Gson().toJson(wantedFiles);
+        h.selectionRevision++;
+        h.selectionPending = true;
+        h.completedFilesJson = null;
+        boolean checkFiles = enable && (h.state.getValue() == DownloadHandle.State.FINISHED
+                || h.state.getValue() == DownloadHandle.State.ERROR);
+        if (checkFiles) h.selectionRechecking = true;
+        persistAsync(h);
 
         if (enable) {
             h.errorMessage.setValue(null);
@@ -1102,30 +1228,103 @@ public class TorrentManager {
         }
 
         final Sha1Hash hash = rec.hash;
-        final TorrentInfo ti = rec.info;
-        final List<Integer> indices = new ArrayList<>(fileIndices);
+        final Priority[] priorities = new Priority[rec.info.files().numFiles()];
+        for (int i = 0; i < priorities.length; i++) priorities[i] = wantedFiles.contains(i) ? Priority.DEFAULT : Priority.IGNORE;
         io.execute(() -> {
             TorrentHandle th = session.find(hash);
             if (th == null || !th.isValid()) return;
-            Priority target = enable ? Priority.DEFAULT : Priority.IGNORE;
-            for (int idx : indices) {
-                try { th.filePriority(idx, target); }
-                catch (Throwable t) { Log.w(TAG, "filePriority(" + idx + ") failed", t); }
-            }
-            List<Integer> selected = new ArrayList<>();
-            for (int i = 0; i < ti.files().numFiles(); i++) {
-                if (th.filePriority(i) != Priority.IGNORE) selected.add(i);
-            }
-            h.selectedFilesJson = new com.google.gson.Gson().toJson(selected);
-            h.completedFilesJson = null;
-            main.post(() -> persistAsync(h));
+            th.clearPieceDeadlines();
+            th.prioritizeFiles(priorities);
+            if (checkFiles) th.forceRecheck();
             if (enable) {
-                requestFilePieces(th, ti, indices);
                 try { th.setFlags(TorrentFlags.AUTO_MANAGED); }
                 catch (Throwable t) { Log.w(TAG, "setFlags failed", t); }
                 th.resume();
             }
+            main.post(() -> confirmSelection(key));
         });
+    }
+
+    private void confirmSelection(String key) {
+        DownloadHandle h = handles.get(key);
+        TorrentRecord rec = records.get(key);
+        if (h == null || rec == null || !h.selectionPending || h.selectionRechecking || pendingDeletes.containsKey(key)) return;
+        int revision = h.selectionRevision;
+        Set<Integer> selected = selectedIndices(h, rec.info.files());
+        io.execute(() -> {
+            TorrentHandle th = session.find(rec.hash);
+            if (th == null || !th.isValid()) return;
+            Priority[] actual = th.filePriorities();
+            boolean matches = actual.length == rec.info.files().numFiles();
+            for (int i = 0; matches && i < actual.length; i++) matches = (actual[i] != Priority.IGNORE) == selected.contains(i);
+            // Fully seeded torrents ignore file-priority edits; all bytes already exist.
+            final boolean seed = th.status().isSeeding();
+            final boolean confirmed = matches || seed;
+            main.post(() -> {
+                if (handles.get(key) != h || revision != h.selectionRevision || pendingDeletes.containsKey(key)) return;
+                if (!confirmed) { main.postDelayed(() -> confirmSelection(key), 250); return; }
+                h.selectionPending = false;
+                if (seed) {
+                    h.state.setValue(DownloadHandle.State.FINISHED);
+                    persistAsync(h);
+                    stopSeedingFor(rec);
+                    finalizeCompletedFiles(key);
+                }
+                io.execute(() -> {
+                    rec.scheduledRevision = -1;
+                    refreshProgressForKeyBg(key, rec);
+                });
+            });
+        });
+    }
+
+    private static Set<Integer> selectedIndices(DownloadHandle h, FileStorage files) {
+        Set<Integer> selected = new LinkedHashSet<>();
+        if (h.selectedFilesJson != null) {
+            int[] saved = new com.google.gson.Gson().fromJson(h.selectedFilesJson, int[].class);
+            if (saved != null) for (int i : saved) if (i >= 0 && i < files.numFiles()) selected.add(i);
+        } else {
+            selected.addAll(findAllVideoFiles(files));
+            selected.addAll(findSubtitleFiles(files));
+        }
+        return selected;
+    }
+
+    @MainThread
+    public void downloadFirst(String key, @Nullable Integer index) {
+        DownloadHandle h = handles.get(key);
+        TorrentRecord rec = records.get(key);
+        if (h == null || rec == null || pendingDeletes.containsKey(key)) return;
+        if (index != null && (index < 0 || index >= rec.info.files().numFiles())) return;
+        h.preferredFileIndex = index;
+        if (index != null) setFilePriority(key, java.util.Collections.singletonList(index), true);
+        else { h.selectionRevision++; persistAsync(h); }
+        io.execute(() -> refreshProgressForKeyBg(key, rec));
+    }
+
+    /** Change priorities only when the preferred file completes or user intent changes. */
+    private void scheduleNextFile(TorrentHandle th, TorrentRecord rec) {
+        DownloadHandle h = rec.owner;
+        if (h == null || h.selectionPending || h.removing) return;
+        DownloadHandle.State state = h.state.getValue();
+        if (state == DownloadHandle.State.PAUSED || state == DownloadHandle.State.FINISHED || state == DownloadHandle.State.ERROR) return;
+        FileStorage files = rec.info.files();
+        Set<Integer> selected = selectedIndices(h, files);
+        long[] done = th.fileProgress(TorrentHandle.PIECE_GRANULARITY);
+        List<Integer> videos = findAllVideoFiles(files);
+        videos.sort((a, b) -> EpisodeOrder.INSTANCE.compare(files.filePath(a), files.filePath(b)));
+        Integer preferred = h.preferredFileIndex;
+        if (preferred != null) { videos.remove(preferred); videos.add(0, preferred); }
+        int next = -1;
+        for (int i : videos) if (selected.contains(i) && i < done.length && done[i] < files.fileSize(i)) { next = i; break; }
+        if (rec.scheduledFile == next && rec.scheduledRevision == h.selectionRevision) return;
+        rec.scheduledFile = next;
+        rec.scheduledRevision = h.selectionRevision;
+        Priority[] priorities = new Priority[files.numFiles()];
+        for (int i = 0; i < priorities.length; i++) priorities[i] = !selected.contains(i) ? Priority.IGNORE
+                : i == next ? Priority.TOP_PRIORITY : Priority.DEFAULT;
+        th.clearPieceDeadlines();
+        th.prioritizeFiles(priorities);
     }
 
     /**
@@ -1227,19 +1426,22 @@ public class TorrentManager {
     private void finalizeCompletedFiles(String key) {
         DownloadHandle h = handles.get(key);
         TorrentRecord rec = records.get(key);
-        if (h == null || rec == null || h.state.getValue() != DownloadHandle.State.FINISHED) return;
+        if (h == null || rec == null || h.selectionPending || pendingDeletes.containsKey(key) || h.state.getValue() != DownloadHandle.State.FINISHED) return;
+        int revision = h.selectionRevision;
         io.execute(() -> {
-            if (h.state.getValue() != DownloadHandle.State.FINISHED) return;
+            if (h.selectionPending || revision != h.selectionRevision || h.state.getValue() != DownloadHandle.State.FINISHED) return;
             TorrentHandle th = handleFor(key);
             if (th == null) return;
             try {
                 FileStorage files = rec.info.files();
                 String root = rec.directory.getCanonicalPath() + File.separator;
                 List<CompletedFile> completed = new ArrayList<>();
+                Set<Integer> selected = selectedIndices(h, files);
                 for (int i = 0; i < files.numFiles(); i++) {
+                    if (h.selectionPending || revision != h.selectionRevision) return;
                     File disk = new File(rec.directory, files.filePath(i));
                     if (!disk.getCanonicalPath().startsWith(root)) continue;
-                    if (th.filePriority(i) == Priority.IGNORE) {
+                    if (!selected.contains(i)) {
                         if (disk.isFile() && !disk.delete()) Log.w(TAG, "Could not remove skipped file: " + disk.getName());
                     } else {
                         completed.add(new CompletedFile(disk.getAbsolutePath(), files.fileSize(i)));
@@ -1277,6 +1479,7 @@ public class TorrentManager {
                 );
                 h.downloadDirectory = row.downloadDirectory;
                 h.selectedFilesJson = row.selectedFilesJson;
+                h.preferredFileIndex = row.preferredFileIndex;
                 h.completedFilesJson = row.completedFilesJson;
                 h.progress.setValue(new DownloadHandle.Progress(row.lastProgress, 0, 0, 0,
                         row.lastProgress == 100 ? row.sizeBytes : 0, row.sizeBytes));
@@ -1354,7 +1557,7 @@ public class TorrentManager {
     }
 
     private void persistAsync(DownloadHandle h) {
-        if (dao == null) return;
+        if (dao == null || h.removing || handles.get(h.infoHash) != h) return;
         DownloadEntity e = new DownloadEntity();
         e.infoHash = h.infoHash;
         e.title = h.title;
@@ -1374,6 +1577,7 @@ public class TorrentManager {
         e.downloadDirectory = h.downloadDirectory;
         e.selectedFilesJson = h.selectedFilesJson;
         e.completedFilesJson = h.completedFilesJson;
+        e.preferredFileIndex = h.preferredFileIndex;
         io.execute(() -> {
             try { dao.upsert(e); }
             catch (Throwable t2) { Log.e(TAG, "persist failed", t2); }
@@ -1452,18 +1656,17 @@ public class TorrentManager {
                               @Nullable DownloadHandle.State targetState) {
         io.execute(() -> {
             try {
+                if (handle.removing) return;
                 byte[] data = readBytes(torrentFile);
                 final TorrentInfo ti = new TorrentInfo(data);
                 if (!ti.isValid()) throw new IllegalStateException("TorrentInfo is invalid");
 
                 final FileStorage files = ti.files();
                 List<Integer> videoIndices = findAllVideoFiles(files);
-                // Keep one "primary" video file for the player — largest by size
-                // among the video files, falls back to the largest file overall
-                // when no extension matched.
+                videoIndices.sort((a, b) -> EpisodeOrder.INSTANCE.compare(files.filePath(a), files.filePath(b)));
                 final int videoIdx = videoIndices.isEmpty()
                         ? findVideoFile(files)
-                        : largestOf(files, videoIndices);
+                        : videoIndices.get(0);
                 final List<Integer> subtitleIndices = findSubtitleFiles(files);
 
                 Set<Integer> wantedFiles = new LinkedHashSet<>();
@@ -1504,11 +1707,12 @@ public class TorrentManager {
                     }
                     final TorrentHandle fe = existing;
                     main.post(() -> {
+                        if (handles.get(handle.infoHash) != handle || pendingDeletes.containsKey(handle.infoHash)) return;
                         bindRecord(handle, ti, files, videoIdx, subtitleIndices);
                         io.execute(() -> ensureWantedBoundaryPiecePriority(fe, ti, files, wantedFiles));
                         if (!addPaused) {
                             TorrentRecord r = records.get(handle.infoHash);
-                            io.execute(() -> prioritiseTailPieces(fe, r));
+                            io.execute(() -> scheduleNextFile(fe, r));
                         }
                         handle.state.setValue(finalState);
                         persistAsync(handle);
@@ -1546,11 +1750,12 @@ public class TorrentManager {
                 final TorrentHandle fth = th;
                 final boolean hadResume = resumeArg != null;
                 main.post(() -> {
+                    if (handles.get(handle.infoHash) != handle || pendingDeletes.containsKey(handle.infoHash)) return;
                     bindRecord(handle, ti, files, videoIdx, subtitleIndices);
                     io.execute(() -> ensureWantedBoundaryPiecePriority(fth, ti, files, wantedFiles));
                     if (!addPaused) {
                         TorrentRecord r = records.get(handle.infoHash);
-                        io.execute(() -> prioritiseTailPieces(fth, r));
+                        io.execute(() -> scheduleNextFile(fth, r));
                     }
                     handle.state.setValue(finalState);
                     persistAsync(handle);
@@ -1575,6 +1780,7 @@ public class TorrentManager {
     private void bindRecord(DownloadHandle handle, TorrentInfo ti, FileStorage files, int videoIdx,
                             List<Integer> subtitleIndices) {
         TorrentRecord rec = new TorrentRecord();
+        rec.owner = handle;
         rec.hash = ti.infoHash();
         rec.info = ti;
         rec.directory = handle.downloadDirectory == null ? saveDir : new File(handle.downloadDirectory);
@@ -1771,6 +1977,9 @@ public class TorrentManager {
             AlertType.TORRENT_PAUSED.swig(),
             AlertType.TORRENT_ERROR.swig(),
             AlertType.SAVE_RESUME_DATA.swig(),
+            AlertType.TORRENT_DELETED.swig(),
+            AlertType.TORRENT_DELETE_FAILED.swig(),
+            AlertType.FILE_PRIO.swig(),
     };
 
     private final AlertListener alertListener = new AlertListener() {
@@ -1787,6 +1996,19 @@ public class TorrentManager {
             catch (Throwable ex) { return; }
 
             switch (t) {
+                case TORRENT_DELETED:
+                    final String deleted = ((org.libtorrent4j.alerts.TorrentDeletedAlert) alert).getInfoHashes().getBest().toHex();
+                    main.post(() -> { Runnable action = pendingDeletes.get(deleted); if (action != null) action.run(); });
+                    break;
+                case TORRENT_DELETE_FAILED:
+                    final String failedHash = ((org.libtorrent4j.alerts.TorrentDeleteFailedAlert) alert).getInfoHashes().getBest().toHex();
+                    final String failure = alert.message();
+                    main.post(() -> { java.util.function.Consumer<String> callback = deleteFailures.get(failedHash); if (callback != null) callback.accept(failure); });
+                    break;
+                case FILE_PRIO:
+                    final String changed = ((org.libtorrent4j.alerts.TorrentAlert<?>) alert).handle().infoHash().toHex();
+                    main.post(() -> confirmSelection(changed));
+                    break;
                 case TORRENT_PAUSED:
                     if (alert instanceof org.libtorrent4j.alerts.TorrentPausedAlert) {
                         final String hex = ((org.libtorrent4j.alerts.TorrentPausedAlert) alert).handle().infoHash().toHex();
@@ -1858,9 +2080,27 @@ public class TorrentManager {
 
     private void onCheckedByHex(String hex) {
         String key = hex == null ? "" : hex.toLowerCase(Locale.US);
+        DownloadHandle editing = handles.get(key);
+        TorrentRecord editingRecord = records.get(key);
+        if (editing != null && editing.selectionRechecking && editingRecord != null && !editing.removing) {
+            editing.selectionRechecking = false;
+            Set<Integer> selected = selectedIndices(editing, editingRecord.info.files());
+            io.execute(() -> {
+                TorrentHandle th = session.find(editingRecord.hash);
+                if (th == null || !th.isValid() || editing.removing) return;
+                Priority[] priorities = new Priority[editingRecord.info.files().numFiles()];
+                for (int i = 0; i < priorities.length; i++) priorities[i] = selected.contains(i) ? Priority.DEFAULT : Priority.IGNORE;
+                th.prioritizeFiles(priorities);
+                th.resume();
+                main.post(() -> confirmSelection(key));
+            });
+            return;
+        }
         // Startup checks must never turn a paused/completed download into a repair.
         if (!rechecking.remove(key)) return;
         DownloadHandle dh = handles.get(key);
+        if (dh == null || dh.selectionPending || pendingDeletes.containsKey(key)) return;
+        int revision = dh.selectionRevision;
         TorrentRecord rec = records.get(key);
         if (rec == null || rec.hash == null || session == null) return;
 
@@ -1875,6 +2115,7 @@ public class TorrentManager {
                 th.resume();
                 if (dh != null) {
                     main.post(() -> {
+                        if (dh.selectionPending || dh.selectionRevision != revision || pendingDeletes.containsKey(key)) return;
                         dh.state.setValue(DownloadHandle.State.BUFFERING);
                         DownloadHandle.Progress p = dh.progress.getValue();
                         if (p != null) {
@@ -1887,6 +2128,7 @@ public class TorrentManager {
                 }
             } else if (dh != null) {
                 main.post(() -> {
+                    if (dh.selectionPending || dh.selectionRevision != revision || pendingDeletes.containsKey(key)) return;
                     dh.state.setValue(DownloadHandle.State.FINISHED);
                     persistAsync(dh);
                     stopSeedingFor(rec);
@@ -1897,19 +2139,14 @@ public class TorrentManager {
 
     private void onFinishedByHex(String hex) {
         String key = hex == null ? "" : hex.toLowerCase(Locale.US);
-        if (rechecking.contains(key)) return;
+        if (rechecking.contains(key) || pendingDeletes.containsKey(key)) return;
         DownloadHandle dh = handles.get(key);
+        if (dh != null && dh.selectionPending) return;
         if (dh != null && (dh.state.getValue() == DownloadHandle.State.ERROR
                 || dh.state.getValue() == DownloadHandle.State.PAUSED)) return;
         TorrentRecord rec = records.get(key);
-        if (dh != null) {
-            dh.state.setValue(DownloadHandle.State.FINISHED);
-            persistAsync(dh);
-        }
-        if (rec != null) {
-            stopSeedingFor(rec);
-            if (rec.videoFilePath != null) notifyMediaScanner(rec.videoFilePath);
-        }
+        // A queued finished alert may describe the selection before a user edit.
+        if (rec != null) io.execute(() -> refreshProgressForKeyBg(key, rec));
     }
 
     private void onErrorByHex(String hex, String msg) {
@@ -1940,8 +2177,11 @@ public class TorrentManager {
     /** libtorrent reads on the io thread; the LiveData mutations are posted to main. */
     private void refreshProgressForKeyBg(String key, TorrentRecord rec) {
         if (rec.hash == null || session == null) return;
+        int revision = rec.owner.selectionRevision;
+        if (rec.owner.selectionPending || rec.owner.removing) return;
         TorrentHandle th = session.find(rec.hash);
         if (th == null || !th.isValid()) return;
+        scheduleNextFile(th, rec);
 
         TorrentStatus status = th.status();
         final int pct = Math.max(0, Math.min(100, Math.round(status.progress() * 100)));
@@ -1963,16 +2203,16 @@ public class TorrentManager {
                 && rec.videoFilePath.exists() && rec.videoFilePath.length() > 0;
 
         main.post(() -> applyProgress(key, rec, pct, rawSpeed, seeders, bufferPct,
-                downloadedBytes, totalBytes, headReady, fileReady, missingWanted));
+                downloadedBytes, totalBytes, headReady, fileReady, missingWanted, revision));
     }
 
     @MainThread
     private void applyProgress(String key, TorrentRecord rec, int pct, long rawSpeed,
                                int seeders, int bufferPct, long downloadedBytes,
                                long totalBytes, boolean headReady, boolean fileReady,
-                               int missingWanted) {
+                               int missingWanted, int revision) {
         DownloadHandle h = handles.get(key);
-        if (h == null) return;
+        if (h == null || h.selectionPending || h.selectionRevision != revision || pendingDeletes.containsKey(key)) return;
 
         // Suppress reported speed for paused / finished torrents so the UI
         // doesn't jitter with leftover stats from libtorrent's last sample.
@@ -1986,6 +2226,7 @@ public class TorrentManager {
 
         h.progress.setValue(new DownloadHandle.Progress(
                 pct, speed, seeders, bufferPct, downloadedBytes, totalBytes));
+        if (curState == DownloadHandle.State.PAUSED) return;
 
         if (!rec.readyEmitted && rec.videoFilePath != null && headReady && fileReady) {
             rec.readyEmitted = true;

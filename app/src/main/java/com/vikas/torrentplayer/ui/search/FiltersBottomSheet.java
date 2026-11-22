@@ -30,12 +30,13 @@ public class FiltersBottomSheet extends BottomSheetDialogFragment {
     public interface Listener {
         void onFiltersApplied(@Nullable String genre,
                               @Nullable Integer season,
-                              @Nullable Integer episode);
+                              @Nullable Integer episode, @Nullable String language);
     }
 
     private static final String ARG_GENRE = "genre";
     private static final String ARG_SEASON = "season";
     private static final String ARG_EPISODE = "episode";
+    private static final String ARG_LANGUAGE = "language";
 
     public static FiltersBottomSheet newInstance(@Nullable String genre,
                                                  @Nullable Integer season,
@@ -86,11 +87,18 @@ public class FiltersBottomSheet extends BottomSheetDialogFragment {
         b.genre.setAdapter(genreAdapter);
         b.genre.setText(currentGenre != null ? currentGenre : genres[0], false);
 
+        String[] languageCodes = {null, "en", "hi", "ta", "te", "ml", "kn", "bn", "mr", "pa", "gu", "ja", "ko", "zh", "es", "fr", "de"};
+        String[] languageNames = {"Any audio language", "English", "Hindi", "Tamil", "Telugu", "Malayalam", "Kannada", "Bengali", "Marathi", "Punjabi", "Gujarati", "Japanese", "Korean", "Chinese", "Spanish", "French", "German"};
+        int selectedLanguage = java.util.Arrays.asList(languageCodes).indexOf(args.getString(ARG_LANGUAGE));
+        b.language.setAdapter(new ArrayAdapter<>(requireContext(), android.R.layout.simple_list_item_1, languageNames));
+        b.language.setText(languageNames[Math.max(0, selectedLanguage)], false);
+
         if (currentSeason != null) b.season.setText(String.valueOf(currentSeason));
         if (currentEpisode != null) b.episode.setText(String.valueOf(currentEpisode));
 
         b.btnClear.setOnClickListener(v -> {
             b.genre.setText(genres[0], false);
+            b.language.setText(languageNames[0], false);
             b.season.setText("");
             b.episode.setText("");
             b.seasonLayout.setError(null);
@@ -115,11 +123,13 @@ public class FiltersBottomSheet extends BottomSheetDialogFragment {
             b.seasonLayout.setError(null);
             b.episodeLayout.setError(null);
 
-            if (listener != null) listener.onFiltersApplied(genre, season, episode);
+            int languageIndex = java.util.Arrays.asList(languageNames).indexOf(b.language.getText().toString());
+            String language = languageCodes[Math.max(0, languageIndex)];
+            if (listener != null) listener.onFiltersApplied(genre, season, episode, language);
             // Try the host fragment too — convenient when caller did not call setListener()
             Fragment parent = getParentFragment();
             if (parent instanceof Listener) {
-                ((Listener) parent).onFiltersApplied(genre, season, episode);
+                ((Listener) parent).onFiltersApplied(genre, season, episode, language);
             }
             dismiss();
         });
@@ -141,8 +151,10 @@ public class FiltersBottomSheet extends BottomSheetDialogFragment {
                             @Nullable String genre,
                             @Nullable Integer season,
                             @Nullable Integer episode,
+                            @Nullable String language,
                             @NonNull Listener listener) {
         FiltersBottomSheet f = newInstance(genre, season, episode);
+        f.requireArguments().putString(ARG_LANGUAGE, language);
         f.setListener(listener);
         f.show(fm, "filters");
     }

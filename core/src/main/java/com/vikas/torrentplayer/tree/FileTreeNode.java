@@ -41,7 +41,13 @@ public class FileTreeNode {
             insert(root, splitPath(path), 0, i, size);
         }
         computeAggregates(root);
+        sort(root);
         return root;
+    }
+    private static void sort(FileTreeNode node) {
+        node.children.sort((a, b) -> a.isFolder != b.isFolder ? (a.isFolder ? -1 : 1)
+                : com.vikas.torrentplayer.torrent.EpisodeOrder.INSTANCE.compare(a.name, b.name));
+        for (FileTreeNode child : node.children) sort(child);
     }
 
     private static String[] splitPath(String path) {

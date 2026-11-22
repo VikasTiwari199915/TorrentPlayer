@@ -46,6 +46,15 @@ public interface TorrentClawApi {
     );
 
     /** Returns full detail (including torrents) for a given result. */
+    @GET("api/v1/search")
+    Call<SearchResponse> searchWithLanguage(
+            @Header("Authorization") String bearer, @Query("q") String query,
+            @Query("type") String type, @Query("availability") String availability,
+            @Query("sort") String sort, @Query("page") int page, @Query("limit") int limit,
+            @Query("verified") boolean verified, @Query("genre") String genre,
+            @Query("season") Integer season, @Query("episode") Integer episode,
+            @Query("api_key") String apiKey, @Query("lang") String language);
+
     @GET("api/v1/content/{id}")
     Call<SearchResult> getContent(
             @Header("Authorization") String bearer,

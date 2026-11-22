@@ -41,4 +41,5 @@ public class DownloadEntity {
     public String downloadDirectory;
     public String selectedFilesJson;
     public String completedFilesJson;
+    public Integer preferredFileIndex;
 }

@@ -46,7 +46,6 @@
             android:id="@+id/name"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:maxLines="3"
             android:textAppearance="?attr/textAppearanceBodyMedium"
             tools:text="The.Boys.S04E01.1080p.WEB-DL.x265-RELEASE.mkv" />
 
@@ -69,6 +68,17 @@
             app:trackCornerRadius="2dp"
             tools:progress="62" />
     </LinearLayout>
+
+    <androidx.appcompat.widget.AppCompatImageButton
+        android:id="@+id/priority"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="File priority"
+        android:tooltipText="File priority"
+        android:visibility="gone"
+        app:srcCompat="@android:drawable/ic_menu_sort_by_size"
+        app:tint="?attr/colorOnSurface" />
 
     <com.google.android.material.checkbox.MaterialCheckBox
         android:id="@+id/toggle"

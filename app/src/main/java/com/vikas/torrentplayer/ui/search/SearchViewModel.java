@@ -39,6 +39,13 @@ public class SearchViewModel extends AndroidViewModel {
     private final MutableLiveData<String> errorMessage = new MutableLiveData<>(null);
 
     private String currentQuery = "";
+    private String currentLanguage;
+    public String currentLanguage() { return currentLanguage; }
+    public void setLanguage(String language) {
+        if (eq(currentLanguage, language)) return;
+        currentLanguage = language;
+        if (!currentQuery.isEmpty()) search(currentQuery);
+    }
     private Filter currentFilter = Filter.ALL;
     @Nullable private String currentGenre;     // null = no filter
     @Nullable private Integer currentSeason;   // null = no filter
@@ -68,7 +75,7 @@ public class SearchViewModel extends AndroidViewModel {
      *  show an "active filter" indicator without reaching into VM internals. */
     public boolean hasActiveFilters() {
         return currentFilter != Filter.ALL
-                || currentGenre != null
+                || currentGenre != null || currentLanguage != null
                 || currentSeason != null
                 || currentEpisode != null;
     }
@@ -83,11 +90,13 @@ public class SearchViewModel extends AndroidViewModel {
 
     /** Apply a combined filter snapshot from the bottom sheet. */
     public void applyFilters(@Nullable String genre, @Nullable Integer season,
-                             @Nullable Integer episode) {
+                             @Nullable Integer episode, @Nullable String language) {
         boolean changed = !eq(genre, currentGenre)
+                || !eq(language, currentLanguage)
                 || !eq(season, currentSeason)
                 || !eq(episode, currentEpisode);
         currentGenre = genre;
+        currentLanguage = language;
         currentSeason = season;
         currentEpisode = episode;
         if (changed && !currentQuery.isEmpty()) {
@@ -138,7 +147,7 @@ public class SearchViewModel extends AndroidViewModel {
         String bearer = ApiClient.bearer(apiKey);
         boolean verifiedOnly = prefs.isVerifiedOnly();
 
-        inFlight = api.search(
+        inFlight = api.searchWithLanguage(
                 bearer,
                 currentQuery,
                 type,
@@ -150,7 +159,7 @@ public class SearchViewModel extends AndroidViewModel {
                 currentGenre,
                 currentSeason,
                 currentEpisode,
-                apiKey
+                apiKey, currentLanguage
         );
 
         final boolean firstPage = reset;

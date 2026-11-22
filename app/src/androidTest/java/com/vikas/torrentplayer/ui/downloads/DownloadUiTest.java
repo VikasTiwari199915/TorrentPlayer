@@ -56,6 +56,7 @@ public class DownloadUiTest {
                         .getMenu().findItem(R.id.action_favorite).isChecked()));
                 return checked.get();
             });
+            screenshot("favorite-filled");
             screen.onActivity(a -> ((MaterialToolbar) a.findViewById(R.id.toolbar)).getMenu()
                     .performIdentifierAction(R.id.action_favorite, 0));
             waitUntil(() -> AppDatabase.get(context).favoriteDao().getAll().stream().noneMatch(f -> Favorites.matches(f, result)));
@@ -113,6 +114,14 @@ public class DownloadUiTest {
                     return collapsed.get();
                 });
             }
+            java.util.concurrent.atomic.AtomicReference<String> deletion = new java.util.concurrent.atomic.AtomicReference<>("waiting");
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> TorBoxManager.get().deleteTorrent(id,
+                    new TorBoxManager.Callback<Void>() {
+                        @Override public void onResult(Void ignored) { deletion.set(null); }
+                        @Override public void onError(String error) { deletion.set(error); }
+                    }));
+            waitUntil(() -> !"waiting".equals(deletion.get()));
+            assertNull(deletion.get()); assertFalse(first.exists()); assertFalse(second.exists());
         } finally {
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> TorBoxManager.get().removeTorrent(id));
             AppDatabase.get(context).torBoxDao().deleteByKey("tb:" + id + ":1");

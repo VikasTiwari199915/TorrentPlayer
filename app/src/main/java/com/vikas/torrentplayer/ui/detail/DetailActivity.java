@@ -342,7 +342,7 @@ public class DetailActivity extends AppCompatActivity {
         boolean saved = favoriteRows.stream().anyMatch(f -> com.vikas.torrentplayer.db.Favorites.matches(f, currentResult));
         favoriteAction.setTitle(saved ? "Remove from favorites" : "Add to favorites");
         favoriteAction.setChecked(saved);
-        favoriteAction.setIcon(saved ? R.drawable.rounded_star_24 : R.drawable.ic_star_outline);
+        favoriteAction.setIcon(saved ? R.drawable.ic_star_filled : R.drawable.ic_star_outline);
         favoriteAction.getIcon().setTint(com.google.android.material.color.MaterialColors.getColor(
                 b.toolbar, saved ? androidx.appcompat.R.attr.colorPrimary : com.google.android.material.R.attr.colorOnSurface));
     }

@@ -102,7 +102,8 @@ public class SearchFragment extends Fragment {
                         vm.currentGenre(),
                         vm.currentSeason(),
                         vm.currentEpisode(),
-                        (genre, season, episode) -> vm.applyFilters(genre, season, episode));
+                        vm.currentLanguage(),
+                        (genre, season, episode, language) -> vm.applyFilters(genre, season, episode, language));
                 return true;
             }
             return false;

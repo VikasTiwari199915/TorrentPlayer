@@ -86,6 +86,8 @@ public class DetailsFilesFragment extends Fragment {
 
         FileTreeNode root = FileTreeNode.build(fs);
         File baseDir = TorrentManager.get().getSaveDir();
+        DownloadHandle savedDownload = TorrentManager.get().findByHash(infoHash);
+        if (savedDownload != null && savedDownload.downloadDirectory != null) baseDir = new File(savedDownload.downloadDirectory);
 
         b.recycler.setLayoutManager(new LinearLayoutManager(requireContext()));
         adapter = new TreeAdapter(root, baseDir, infoHash, requireContext(),
@@ -174,6 +176,7 @@ public class DetailsFilesFragment extends Fragment {
         private final Runnable refreshStats;
         private long[] downloadedBytes = new long[0];
         private boolean[] wanted = new boolean[0];
+        private Integer displayedPreferred;
 
         TreeAdapter(FileTreeNode root, File baseDir, String infoHash,
                     Context ctx, Runnable refreshStats) {
@@ -202,6 +205,10 @@ public class DetailsFilesFragment extends Fragment {
         }
 
         void updateStats(TorrentManager.FileStats stats) {
+            DownloadHandle handle = TorrentManager.get().findByHash(infoHash);
+            Integer preferred = handle == null ? null : handle.preferredFileIndex;
+            boolean priorityChanged = !java.util.Objects.equals(displayedPreferred, preferred);
+            displayedPreferred = preferred;
             long[] oldDownloaded = downloadedBytes;
             boolean[] oldWanted = wanted;
             downloadedBytes = stats.downloadedBytes;
@@ -210,7 +217,7 @@ public class DetailsFilesFragment extends Fragment {
                 FileTreeNode node = rows.get(i);
                 NodeStats before = statsFor(node, oldDownloaded, oldWanted);
                 NodeStats after = statsFor(node, downloadedBytes, wanted);
-                if (!before.sameAs(after)) notifyItemChanged(i, PAYLOAD_STATS);
+                if (priorityChanged || !before.sameAs(after)) notifyItemChanged(i, PAYLOAD_STATS);
             }
         }
 
@@ -251,6 +258,20 @@ public class DetailsFilesFragment extends Fragment {
             b.icon.setImageResource(node.isFolder ? R.drawable.rounded_folder_24 : R.drawable.rounded_docs_24);
             b.expander.setText(node.isFolder ? (expanded.contains(node) ? "-" : "+") : "");
             b.name.setText(node.name);
+            b.priority.setVisibility(node.isFolder ? View.GONE : View.VISIBLE);
+            b.priority.setOnClickListener(v -> {
+                androidx.appcompat.widget.PopupMenu menu = new androidx.appcompat.widget.PopupMenu(ctx, b.priority);
+                menu.getMenu().add(0, 1, 0, "Download first");
+                menu.getMenu().add(0, 2, 1, "Automatic episode order");
+                menu.setOnMenuItemClickListener(item -> {
+                    if (item.getItemId() == 1) TorrentDownloadService.start(ctx);
+                    TorrentManager.get().downloadFirst(infoHash, item.getItemId() == 1 ? node.fileIndex : null);
+                    refreshStats.run();
+                    Toast.makeText(ctx, item.getItemId() == 1 ? "Downloading first: " + node.name : "Automatic episode order", Toast.LENGTH_SHORT).show();
+                    return true;
+                });
+                menu.show();
+            });
             bindStats(b, node);
 
             // Row taps navigate the hierarchy/open files. Selection is checkbox-only.
@@ -357,6 +378,7 @@ public class DetailsFilesFragment extends Fragment {
             else if (stats.downloadedBytes > 0) selection = "Downloading";
             else selection = "Queued";
             String prefix = node.isFolder ? node.fileCount + " files · " : "";
+            if (!node.isFolder && java.util.Objects.equals(displayedPreferred, node.fileIndex)) prefix = "Download first · ";
             return prefix + FormatUtils.humanBytes(stats.downloadedBytes)
                     + " of " + FormatUtils.humanBytes(node.size)
                     + " · " + pct + "% · " + selection;

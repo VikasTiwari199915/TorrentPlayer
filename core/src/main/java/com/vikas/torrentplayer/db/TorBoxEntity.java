@@ -20,6 +20,7 @@ public class TorBoxEntity {
     public String infoHash;
     public String posterUrl;
     public String description;
+    public String downloadDirectory;
     public long torrentId;
     public int fileId;
     public String fileName;
